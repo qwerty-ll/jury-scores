@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Оценки жюри · ЗКНП</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">Оценки жюри · ЗКНП</div>
+    <span class="spacer"></span>
+    <span id="net" class="net wait">Подключение…</span>
+  </header>
+  <main id="view" class="wrap" style="max-width:none"></main>
+</div>
+<script>
+(() => {
+  // Всё, что судья нажал, сначала пишется в память браузера (очередь),
+  // а потом отправляется на главный сервер. Нет связи — очередь ждёт и уходит позже.
+  const ls = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  };
+  let token = ls.get('token', null);
+  let server = ls.get('state', null);     // последнее состояние с сервера
+  let queue = ls.get('queue', []);        // ещё не подтверждённые нажатия
+  let offset = 0;                         // поправка часов устройства к часам сервера
+  let selPerf = null, lastCurrent = null;
+  let online = null, syncing = false;
+  let pin = '', pinErr = '';
+  let confirmSubmit = null;
+  let lastHtml = '';
+
+  const view = document.getElementById('view');
+  const net = document.getElementById('net');
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const opId = () => Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+  const now = () => Date.now() + offset;
+  const fmt = sec => sec == null ? '--:--' : String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(Math.floor(sec) % 60).padStart(2, '0');
+  const elapsed = p => p.startedAt ? Math.max(0, ((p.endedAt || now()) - p.startedAt) / 1000) : null;
+  function timingPoints(sec) {
+    if (sec == null) return null;
+    if (sec <= server.limitMin * 60) return 2;
+    if (sec <= server.hardMin * 60) return 1;
+    return 0;
+  }
+  const pillFor = t => t == null ? 'n' : t === 2 ? 'g' : t === 1 ? 'w' : 'b';
+  const ptsWord = n => n === 1 ? 'балл' : (n >= 2 && n <= 4) ? 'балла' : 'баллов';
+
+  function formatCritTitle(raw) {
+    const m = String(raw || '').match(/^([^(]+)\(([^)]+)\)\s*$/);
+    if (!m) return `<span class="crit-name">${esc(raw)}</span>`;
+    return `<div style="flex:1;min-width:0"><div class="crit-name">${esc(m[1].trim())}</div><div class="small muted">${esc(m[2].trim())}</div></div>`;
+  }
+
+  // лист судьи = то, что подтвердил сервер, + то, что ещё в очереди
+  function sheetFor(perfId) {
+    const n = server.criteria.length;
+    const base = server.sheets[perfId] || { marks: [], submitted: false };
+    const marks = Array.from({ length: n }, (_, i) => typeof base.marks[i] === 'number' ? base.marks[i] : null);
+    let submitted = base.submitted, pendingSubmit = false, pending = 0;
+    for (const op of queue) {
+      if (op.perf !== perfId) continue;
+      pending++;
+      if (submitted) continue;
+      if (op.type === 'mark') marks[op.crit] = op.val;
+      if (op.type === 'submit') pendingSubmit = true;
+    }
+    return { marks, submitted, pendingSubmit, pending };
+  }
+
+  function setNet() {
+    const waiting = queue.length;
+    if (online === false) { net.className = 'net off'; net.textContent = waiting ? `Нет связи · ждут отправки: ${waiting}` : 'Нет связи с сервером'; }
+    else if (waiting) { net.className = 'net wait'; net.textContent = `Отправка… (${waiting})`; }
+    else if (online) { net.className = 'net ok'; net.textContent = '● Связь есть, всё сохранено'; }
+  }
+
+  // ---------- сеть ----------
+  async function api(path, body) {
+    const res = await fetch(path, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { const e = new Error(data.error || res.status); e.status = res.status; throw e; }
+    return data;
+  }
+  function takeState(s, sentAt) {
+    offset = s.now - (sentAt + Date.now()) / 2;
+    server = s; ls.set('state', s);
+  }
+  async function sync() {
+    if (syncing || !token) return;
+    syncing = true;
+    const sent = queue.slice(0, 200);
+    const t0 = Date.now();
+    try {
+      const r = sent.length ? await api('/api/sync', { ops: sent }) : await api('/api/state');
+      if (sent.length) {
+        const done = new Set(sent.map(o => o.id));
+        queue = queue.filter(o => !done.has(o.id));
+        ls.set('queue', queue);
+      }
+      takeState(r.state, t0);
+      online = true;
+    } catch (e) {
+      if (e.status === 401) {
+        token = null; ls.set('token', null);
+        pinErr = 'Организатор сбросил вход. Введите PIN ещё раз.';
+        online = true;
+      } else online = false;
+    }
+    syncing = false;
+    render();
+    if (queue.length && online) setTimeout(sync, 50);
+  }
+  setInterval(sync, 2000);
+  window.addEventListener('online', sync);
+
+  function push(op) {
+    queue.push({ id: opId(), ts: Date.now(), ...op });
+    ls.set('queue', queue);
+    render();
+    sync();
+  }
+
+  // ---------- экраны ----------
+  function render() {
+    setNet();
+    const html = !token ? pinScreen() : !server ? `<div class="card"><h2>Загрузка…</h2></div>` : juryScreen();
+    if (html !== lastHtml) { view.innerHTML = html; lastHtml = html; }
+    tick();
+  }
+
+  function pinScreen() {
+    return `<div class="pinbox">
+      <h2>Введите ваш PIN</h2>
+      <p class="muted" style="margin:0">PIN выдаёт организатор. Можно нажимать кнопки или вводить с клавиатуры ноутбука.</p>
+      <div class="pindots" aria-label="Введено цифр: ${pin.length}">${[0, 1, 2, 3].map(i => `<span class="${i < pin.length ? 'on' : ''}"></span>`).join('')}</div>
+      <div class="err" role="alert">${esc(pinErr)}</div>
+      <div class="pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => `<button data-d="${d}">${d}</button>`).join('')}
+        <button data-d="del" aria-label="Стереть">⌫</button><button data-d="0">0</button><span></span></div>
+    </div>`;
+  }
+
+  function juryScreen() {
+    const s = server;
+    const list = s.perfs;
+    if (!list.length) return `<div class="card"><h2>Постановок пока нет</h2><p class="muted">Организатор ещё не добавил их.</p></div>`;
+    if (s.current !== lastCurrent) { lastCurrent = s.current; if (list.some(p => p.id === s.current)) selPerf = s.current; }
+    if (!selPerf || !list.some(p => p.id === selPerf)) selPerf = list.some(p => p.id === s.current) ? s.current : list[0].id;
+    const p = list.find(x => x.id === selPerf);
+    const idx = list.indexOf(p);
+    const sh = sheetFor(p.id);
+    const n = s.criteria.length, max = s.maxMark;
+    const maxJury = n * max; // 30
+    const filled = sh.marks.filter(v => v !== null).length;
+    const sum = sh.marks.reduce((a, v) => a + (v || 0), 0);
+    const locked = sh.submitted || sh.pendingSubmit;
+    const sec = elapsed(p), tp = timingPoints(sec);
+    const timerState = !p.startedAt ? `<span class="pill n">Ещё не началась</span>`
+      : !p.endedAt ? `<span class="pill ${pillFor(tp)}">● Идёт</span>`
+      : `<span class="pill ${pillFor(tp)}">Закончилась · +${tp} ${ptsWord(tp)} за тайминг</span>`;
+
+    const totalWithTiming = tp != null ? `${sum + tp} из ${maxJury + 2} (с таймингом +${tp})` : `${sum} из ${maxJury} (+ до 2 за тайминг, макс. ${maxJury + 2})`;
+
+    let footer;
+    if (sh.submitted) footer = `<div class="banner g" style="flex:1">✓ Оценки отправлены. Ваш балл: ${totalWithTiming}. Исправить может только организатор.</div>`;
+    else if (sh.pendingSubmit) footer = `<div class="banner w" style="flex:1">Оценки сохранены на устройстве и уйдут на сервер, как только появится связь.</div>`;
+    else if (confirmSubmit === p.id) footer = `
+      <div style="flex:1;min-width:220px"><b class="num">${sum}</b> <span class="muted">из ${maxJury}</span><div class="small muted">После отправки изменить оценки сможет только организатор.</div></div>
+      <div class="row"><button class="btn" data-act="cancel">Назад</button><button class="btn good" data-act="submit">Да, отправить</button></div>`;
+    else footer = `
+      <span>Сумма жюри: <b class="num">${sum}</b> <span class="muted">из ${maxJury} (макс. с таймингом — ${maxJury + 2})</span><span class="small muted" style="display:block">${filled === n ? 'Все 6 критериев оценены' : `Оценено ${filled} из ${n}`}</span></span>
+      <button class="btn primary" data-act="ask-submit" ${filled === n ? '' : 'disabled'}>Отправить оценки</button>`;
+
+    return `
+      <div class="row small"><span class="muted">Вы: <b style="color:var(--fg)">${esc(s.juror.name)}</b></span><span class="spacer"></span><span class="muted">Шкала 0–5 · Максимум 32 балла</span></div>
+      <div class="chips" role="group" aria-label="Постановки">${list.map((x, i) => {
+        const xs = sheetFor(x.id);
+        return `<button data-perf="${x.id}" aria-pressed="${x.id === p.id}">${i + 1}. ${esc(x.institute)}${xs.submitted || xs.pendingSubmit ? '<span class="tick">✓</span>' : ''}${x.startedAt && !x.endedAt ? '<span class="live" aria-label="идёт сейчас"></span>' : ''}</button>`;
+      }).join('')}</div>
+      <section class="card">
+        <div class="eyebrow">Постановка ${idx + 1} из ${list.length}</div>
+        <div class="perf-inst">${esc(p.institute)}</div>
+        ${p.title ? `<div class="perf-title">«${esc(p.title)}»</div>` : ''}
+        ${p.description ? `<div class="perf-desc">${esc(p.description)}</div>` : ''}
+        <div class="timer"><span class="clock" data-clock="${p.id}">${p.startedAt && !p.endedAt ? '' : fmt(sec)}</span>${timerState}<span class="muted small">до ${s.limitMin} мин: +2 б · 16–${s.hardMin} мин: +1 б · >${s.hardMin} мин: 0 б</span></div>
+      </section>
+      <section class="card ${locked ? 'locked' : ''}" aria-label="Критерии ЗКНП">
+        ${s.criteria.map((name, i) => `
+          <div class="crit">
+            <div class="crit-head"><span class="crit-n">${i + 1}</span>${formatCritTitle(name)}</div>
+            <div class="scale" role="group" aria-label="${esc(name)}">
+              ${Array.from({ length: max + 1 }, (_, v) => `<button data-crit="${i}" data-val="${v}" aria-pressed="${sh.marks[i] === v}" ${locked ? 'disabled' : ''}>${v}</button>`).join('')}
+            </div>
+          </div>`).join('')}
+        <div class="crit">
+          <div class="crit-head">
+            <span class="crit-n">${n + 1}</span>
+            <div style="flex:1;min-width:0">
+              <div class="crit-name">Тайминг <span class="pill ${pillFor(tp)}" style="margin-left:8px;vertical-align:middle">${tp != null ? `+${tp} ${ptsWord(tp)}` : 'выставляется автоматически'}</span></div>
+              <div class="small muted">2 балла — до ${s.limitMin} минут · 1 балл — 16–${s.hardMin} минут · 0 баллов — более ${s.hardMin} минут</div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <div class="sumbar">${footer}</div>`;
+  }
+
+  function tick() {
+    if (!server) return;
+    document.querySelectorAll('[data-clock]').forEach(el => {
+      const p = server.perfs.find(x => x.id === el.dataset.clock);
+      if (p && p.startedAt && !p.endedAt) el.textContent = fmt(elapsed(p));
+    });
+  }
+  setInterval(tick, 500);
+
+  // ---------- нажатия ----------
+  async function login() {
+    const t0 = Date.now();
+    try {
+      const r = await api('/api/login', { pin, device: navigator.userAgent.slice(0, 120) });
+      token = r.token; ls.set('token', token);
+      if (server && server.juror && r.state.juror.id !== server.juror.id) { queue = []; ls.set('queue', queue); }
+      takeState(r.state, t0);
+      pin = ''; pinErr = ''; online = true; selPerf = null; lastCurrent = null;
+      window.scrollTo(0, 0);
+    } catch (e) {
+      pin = ''; pinErr = e.status ? e.message : 'Нет связи с сервером. Проверьте Wi‑Fi.';
+    }
+    render();
+  }
+
+  // Поддержка клавиатуры ноутбука для ввода PIN
+  window.addEventListener('keydown', e => {
+    if (token) return;
+    if (e.key >= '0' && e.key <= '9') {
+      if (pin.length < 4) pin += e.key;
+      pinErr = '';
+      render();
+      if (pin.length === 4) login();
+    } else if (e.key === 'Backspace') {
+      pin = pin.slice(0, -1);
+      pinErr = '';
+      render();
+    }
+  });
+
+  view.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    const d = b.dataset;
+    if (d.d) {
+      if (d.d === 'del') pin = pin.slice(0, -1);
+      else if (pin.length < 4) pin += d.d;
+      pinErr = '';
+      render();
+      if (pin.length === 4) login();
+      return;
+    }
+    if (d.perf) { selPerf = d.perf; confirmSubmit = null; render(); window.scrollTo(0, 0); return; }
+    if (d.crit != null) {
+      const sh = sheetFor(selPerf);
+      const i = +d.crit, v = +d.val;
+      push({ type: 'mark', perf: selPerf, crit: i, val: sh.marks[i] === v ? null : v });
+      return;
+    }
+    if (d.act === 'ask-submit') { confirmSubmit = selPerf; render(); return; }
+    if (d.act === 'cancel') { confirmSubmit = null; render(); return; }
+    if (d.act === 'submit') { confirmSubmit = null; push({ type: 'submit', perf: selPerf }); return; }
+  });
+
+  render();
+  sync();
+})();
+</script>
+</body>
+</html>

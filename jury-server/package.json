@@ -1,0 +1,12 @@
+{
+  "name": "jury-server-zknp",
+  "version": "1.0.0",
+  "description": "Сервер оценок жюри ЗКНП (без внешних зависимостей)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

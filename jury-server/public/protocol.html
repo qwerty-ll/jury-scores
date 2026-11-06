@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Протокол жюри · ЗКНП</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { background: #fff; }
+  .sig { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 28px 32px; margin-top: 12px; }
+  .sig div { border-bottom: 1px solid #000; padding-top: 28px; font-size: 14px; }
+  td, th { border-bottom: 1px solid #999; }
+</style>
+</head>
+<body>
+<div class="wrap wide" id="view" style="padding-top:20px">Загрузка…</div>
+<script>
+(async () => {
+  const view = document.getElementById('view');
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = s => s == null ? '—' : String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  const n2 = v => v == null ? '—' : (Math.round(v * 100) / 100).toLocaleString('ru-RU');
+  let token = null; try { token = JSON.parse(localStorage.getItem('adminToken')); } catch {}
+  const r = await fetch('/api/admin/state', { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store' });
+  if (!r.ok) { view.textContent = 'Сначала войдите в пульт организатора на этом ноутбуке.'; return; }
+  const S = await r.json();
+  const rows = S.results.slice();
+  const ranked = rows.filter(x => x.total != null).sort((a, b) => b.total - a.total);
+  const place = new Map(ranked.map((x, i) => [x.perf, i + 1]));
+  rows.sort((a, b) => (place.get(a.perf) ?? 99) - (place.get(b.perf) ?? 99));
+  const maxJury = S.criteria.length * S.maxMark;
+  view.innerHTML = `
+    <div class="row noprint"><button class="btn primary" onclick="window.print()">Печать</button></div>
+    <h1>Протокол жюри ЗКНП</h1>
+    <div class="muted">Сформирован ${new Date(S.now).toLocaleString('ru-RU')} · Максимальный балл: ${maxJury + 2} (${maxJury} жюри + 2 тайминг)</div>
+    <h3>Итоги</h3>
+    <table><thead><tr><th>Место</th><th>Институт</th><th>Постановка</th><th class="r">Время</th><th class="r">Среднее жюри (из ${maxJury})</th><th class="r">Тайминг (0–2)</th><th class="r">Итог (из ${maxJury + 2})</th></tr></thead>
+    <tbody>${rows.map(x => `<tr><td>${place.get(x.perf) ?? '—'}</td><td>${esc(x.institute)}</td><td>${esc(x.title)}</td><td class="r">${fmt(x.seconds)}</td><td class="r">${n2(x.avg)}</td><td class="r">${x.timing ?? '—'}</td><td class="r"><b>${n2(x.total)}</b></td></tr>`).join('')}</tbody></table>
+    <h3>Оценки по критериям</h3>
+    <p class="small">${S.criteria.map((c, i) => `<b>${i + 1}</b> — ${esc(c)}`).join('<br>')}<br><b>${S.criteria.length + 1}</b> — Тайминг (автоматически: до ${S.limitMin} мин — 2 балла, 16–${S.hardMin} мин — 1 балл, >${S.hardMin} мин — 0 баллов)</p>
+    ${rows.map(x => `<div style="break-inside:avoid;margin-bottom:14px"><b>${esc(x.institute)}</b> «${esc(x.title)}»
+      <table style="font-size:13px"><thead><tr><th>Судья</th>${S.criteria.map((_, i) => `<th class="r">${i + 1}</th>`).join('')}<th class="r">Сумма (из ${maxJury})</th><th>Отправлено</th></tr></thead>
+      <tbody>${x.sheets.map(s => `<tr><td>${esc(s.name)}</td>${s.marks.map(v => `<td class="r">${v ?? '·'}</td>`).join('')}<td class="r">${s.filled ? s.sum : '—'}</td><td>${s.submitted ? new Date(s.submittedAt).toLocaleTimeString('ru-RU') : 'нет'}</td></tr>`).join('')}</tbody></table></div>`).join('')}
+    <h3>Подписи членов жюри</h3>
+    <div class="sig">${S.jurors.map(j => `<div>${esc(j.name)}</div>`).join('')}</div>`;
+})();
+</script>
+</body>
+</html>

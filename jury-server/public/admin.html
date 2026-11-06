@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Пульт организатора · ЗКНП</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap wide">
+  <header class="top">
+    <div class="brand">Пульт организатора · ЗКНП</div>
+    <nav class="tabs" id="tabs" hidden>
+      <button data-tab="stage">Сцена</button>
+      <button data-tab="jurors">Судьи</button>
+      <button data-tab="results">Итоги</button>
+      <button data-tab="journal">Журнал</button>
+      <button data-tab="setup">Настройка и Бэкап</button>
+    </nav>
+    <span class="spacer"></span>
+    <span id="net" class="net wait">Подключение…</span>
+  </header>
+  <main id="view" class="wrap wide" style="width:100%"></main>
+</div>
+<script>
+(() => {
+  const ls = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  };
+  let token = ls.get('adminToken', null);
+  let S = null, offset = 0, online = null;
+  let tab = ls.get('adminTab', 'stage');
+  let journalData = null;
+  let setupDirty = false, lastHtml = '', loginErr = '';
+  const view = document.getElementById('view');
+  const net = document.getElementById('net');
+  const tabs = document.getElementById('tabs');
+
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const now = () => Date.now() + offset;
+  const fmt = sec => sec == null ? '--:--' : String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(Math.floor(sec) % 60).padStart(2, '0');
+  const elapsed = p => p.startedAt ? Math.max(0, ((p.endedAt || now()) - p.startedAt) / 1000) : null;
+  const fmtNum = n => n == null ? '—' : (Math.round(n * 100) / 100).toLocaleString('ru-RU');
+  const time = t => t ? new Date(t).toLocaleTimeString('ru-RU') : '—';
+  const pillFor = t => t == null ? 'n' : t === 2 ? 'g' : t === 1 ? 'w' : 'b';
+  function timingPoints(sec) {
+    if (sec == null) return null;
+    if (sec <= S.limitMin * 60) return 2;
+    if (sec <= S.hardMin * 60) return 1;
+    return 0;
+  }
+
+  async function api(path, body) {
+    const res = await fetch(path, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      body: body ? JSON.stringify(body) : undefined, cache: 'no-store',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { const e = new Error(data.error || data.result || res.status); e.status = res.status; e.data = data; throw e; }
+    return data;
+  }
+  function take(s, t0) {
+    offset = s.now - (t0 + Date.now()) / 2;
+    S = s;
+    ls.set('adminBackupState', s);
+  }
+
+  async function refresh() {
+    if (!token) return render();
+    const t0 = Date.now();
+    try {
+      take(await api('/api/admin/state'), t0);
+      if (tab === 'journal') journalData = await api('/api/admin/journal?limit=300');
+      online = true;
+    } catch (e) {
+      if (e.status === 401) { token = null; ls.set('adminToken', null); }
+      else online = false;
+    }
+    render();
+  }
+  setInterval(refresh, 1500);
+
+  async function act(a) {
+    const t0 = Date.now();
+    try { const r = await api('/api/admin/action', a); take(r.state, t0); setupDirty = false; }
+    catch (e) { if (e.data && e.data.state) take(e.data.state, t0); alertMsg('Не получилось: ' + e.message); }
+    render();
+  }
+  let flash = '';
+  function alertMsg(t) { flash = t; setTimeout(() => { flash = ''; render(); }, 4000); }
+
+  function render() {
+    net.className = 'net ' + (online === false ? 'off' : online ? 'ok' : 'wait');
+    net.textContent = online === false ? 'Сервер не отвечает' : online ? '● Сервер работает' : 'Подключение…';
+    tabs.hidden = !token;
+    tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'));
+    let html;
+    if (!token) html = loginScreen();
+    else if (!S) html = `<div class="card"><h2>Загрузка…</h2></div>`;
+    else {
+      if (tab === 'setup' && setupDirty) return;
+      html = (flash ? `<div class="banner b">${esc(flash)}</div>` : '') + ({ stage, jurors, results, journal, setup }[tab] || stage)();
+    }
+    if (html !== lastHtml) { view.innerHTML = html; lastHtml = html; }
+    tick();
+  }
+
+  function loginScreen() {
+    return `<form class="card" id="login" style="max-width:420px;margin:40px auto 0">
+      <h2>Вход организатора</h2>
+      <p class="muted small" style="margin:0">Пароль напечатан в окне Терминала, где запущен сервер.</p>
+      <label class="f">Пароль<input type="password" id="pw" autocomplete="current-password" inputmode="numeric"></label>
+      <div class="err">${esc(loginErr)}</div>
+      <button class="btn primary" type="submit">Войти</button></form>`;
+  }
+
+  const perfs = () => S.perfs;
+  const cur = () => perfs().find(p => p.id === S.current) || perfs()[0];
+
+  function stage() {
+    const list = perfs();
+    if (!list.length) return `<div class="card"><h2>Нет постановок</h2><p>Добавьте их во вкладке «Настройка».</p></div>`;
+    const p = cur(), i = list.indexOf(p), sec = elapsed(p), tp = p.endedAt ? timingPoints(sec) : null;
+    const res = S.results.find(r => r.perf === p.id);
+    const sent = res ? res.sheets.filter(s => s.submitted).length : 0;
+    const allDone = S.jurors.length > 0 && sent === S.jurors.length;
+    return `
+      <section class="card">
+        <div class="row"><span class="eyebrow">На сцене · ${i + 1} из ${list.length}</span><span class="spacer"></span>
+          <button class="btn sm" data-cur="${list[i - 1] ? list[i - 1].id : ''}" ${i === 0 ? 'disabled' : ''}>← Предыдущая</button>
+          <button class="btn sm" data-cur="${list[i + 1] ? list[i + 1].id : ''}" ${i === list.length - 1 ? 'disabled' : ''}>Следующая →</button></div>
+        <div class="perf-inst">${esc(p.institute)}</div>
+        ${p.title ? `<div class="perf-title">«${esc(p.title)}»</div>` : ''}
+        ${p.description ? `<div class="perf-desc">${esc(p.description)}</div>` : ''}
+        <div class="timer"><span class="clock big" data-clock="${p.id}">${p.startedAt && !p.endedAt ? '' : fmt(sec)}</span>
+          ${tp != null ? `<span class="pill ${pillFor(tp)}">+${tp} ${tp === 1 ? 'балл' : tp === 0 ? 'баллов' : 'балла'} за тайминг</span>` : ''}</div>
+        <div class="row">
+          ${!p.startedAt ? `<button class="btn primary" data-t="start" style="min-width:240px;min-height:64px;font-size:20px">▶ Начать отсчёт</button>` : ''}
+          ${p.startedAt && !p.endedAt ? `<button class="btn primary" data-t="stop" style="min-width:240px;min-height:64px;font-size:20px">■ Закончить отсчёт</button>` : ''}
+          ${p.startedAt ? `<button class="btn danger" data-t="reset" data-arm>Сбросить время</button>` : ''}
+        </div>
+        ${p.startedAt ? `<div class="small muted">Начало ${time(p.startedAt)}${p.endedAt ? `, конец ${time(p.endedAt)}, длительность <b class="num" style="color:var(--fg)">${fmt(sec)}</b>` : ''}</div>` : ''}
+        <div class="small muted">Тайминг ЗКНП (автоматически): до ${S.limitMin}:00 — 2 балла · 16–${S.hardMin} мин — 1 балл · более ${S.hardMin}:00 — 0 баллов</div>
+      </section>
+      ${allDone ? `<div class="banner g row"><span>✓ Все судьи (${sent}/${S.jurors.length}) отправили оценки по «${esc(p.institute)}»! Резервная копия автоматически сохранена.</span><span class="spacer"></span>${list[i + 1] ? `<button class="btn sm good" data-cur="${list[i + 1].id}">Переключить на «${esc(list[i + 1].institute)}» →</button>` : `<a class="btn sm good" href="/export/results.csv?token=${encodeURIComponent(token)}" style="text-decoration:none">Скачать итоговый Excel</a>`}</div>` : ''}
+      <section class="card">
+        <div class="row"><h3>Судьи по этой постановке</h3><span class="spacer"></span><span class="pill ${allDone ? 'g' : 'n'}">отправили ${sent} из ${S.jurors.length}</span></div>
+        ${jurorTable(p.id)}
+      </section>`;
+  }
+
+  function jurorTable(perfId) {
+    const res = S.results.find(r => r.perf === perfId);
+    const maxJury = S.criteria.length * S.maxMark;
+    return `<div class="tablewrap"><table><thead><tr><th>Судья</th><th>Связь</th><th class="r">Оценено</th><th class="r">Сумма (из ${maxJury})</th><th>Статус</th><th></th></tr></thead><tbody>
+      ${S.jurors.map(j => { const s = res.sheets.find(x => x.juror === j.id); return `<tr>
+        <td>${esc(j.name)}</td>
+        <td><span class="dot ${j.online ? 'on' : ''}"></span> <span class="small muted">${j.online ? 'на связи' : j.lastSeen ? 'был ' + time(j.lastSeen) : 'не входил'}</span></td>
+        <td class="r">${s.filled}/${S.criteria.length}</td><td class="r">${s.filled ? s.sum : '—'}</td>
+        <td>${s.submitted ? `<span class="pill g">отправлено ${time(s.submittedAt)}</span>` : s.filled ? '<span class="pill w">заполняет</span>' : '<span class="pill n">пусто</span>'}</td>
+        <td class="r">${s.submitted ? `<button class="btn sm danger" data-unlock="${j.id}" data-perf="${perfId}" data-arm>Разрешить исправить</button>` : ''}</td></tr>`; }).join('')}
+      </tbody></table></div>`;
+  }
+
+  function jurors() {
+    const addr = S.addresses.map(a => `http://${a.address}:${S.port}`);
+    return `
+      <section class="card">
+        <h3>Как подключить ноутбуки или планшеты жюри</h3>
+        <ol style="margin:0;padding-left:1.2em" class="small">
+          <li>Подключить ноутбуки/планшеты судей к одной сети Wi‑Fi с этим сервером (роутер, точка доступа телефона или раздача с ноутбука).</li>
+          <li>Открыть в браузере адрес: ${addr.length ? addr.map(a => `<b class="num" style="font-size:20px">${esc(a)}</b>`).join(' или ') : '<b>сети нет — подключитесь к Wi‑Fi или включите точку доступа</b>'}</li>
+          <li>Судья вводит свой 4‑значный PIN из таблицы ниже (с клавиатуры или на экране).</li>
+        </ol>
+      </section>
+      <section class="card">
+        <h3>Судьи и PIN</h3>
+        <div class="tablewrap"><table><thead><tr><th>Судья</th><th>PIN</th><th>Связь</th><th class="r">Устройств</th><th></th></tr></thead><tbody>
+        ${S.jurors.map(j => `<tr><td>${esc(j.name)}</td><td class="pin">${esc(j.pin)}</td>
+          <td><span class="dot ${j.online ? 'on' : ''}"></span> <span class="small muted">${j.online ? 'на связи' : j.lastSeen ? 'был ' + time(j.lastSeen) : 'не входил'}</span></td>
+          <td class="r">${j.devices}</td>
+          <td class="r"><div class="row" style="justify-content:flex-end">
+            <button class="btn sm" data-logout="${j.id}" data-arm ${j.devices ? '' : 'disabled'}>Выйти на устройствах</button>
+            <button class="btn sm danger" data-newpin="${j.id}" data-arm>Новый PIN</button></div></td></tr>`).join('')}
+        </tbody></table></div>
+        <p class="small muted" style="margin:0">Новый PIN сразу выкидывает этого судью со всех устройств. Добавить или переименовать судей — во вкладке «Настройка и Бэкап».</p>
+      </section>`;
+  }
+
+  function results() {
+    const rows = S.results.slice();
+    const ranked = rows.filter(r => r.total != null).sort((a, b) => b.total - a.total);
+    const place = new Map(ranked.map((r, i) => [r.perf, i + 1]));
+    rows.sort((a, b) => (place.get(a.perf) ?? 99) - (place.get(b.perf) ?? 99));
+    const n = S.criteria.length;
+    const maxJury = n * S.maxMark; // 30
+    return `
+      <section class="card">
+        <div class="row"><h3>Итоги ЗКНП (максимум ${maxJury + 2} балла)</h3><span class="spacer"></span>
+          <a class="btn sm primary" href="/export/results.csv?token=${encodeURIComponent(token)}" style="text-decoration:none;display:inline-flex;align-items:center">Скачать таблицу (Excel / CSV)</a>
+          <a class="btn sm" href="/protocol" target="_blank" style="text-decoration:none;display:inline-flex;align-items:center">Протокол для печати</a></div>
+        <p class="small muted" style="margin:0">Итог = среднее арифметическое сумм судей (критерии 1–${n} по шкале 0–${S.maxMark}, макс. ${maxJury} баллов) + баллы за тайминг (0–2 балла). Максимально возможно получить <b>${maxJury + 2} балла</b>.</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Место</th><th>Постановка</th><th class="r">Время</th><th class="r">Отправили</th><th class="r">Среднее (из ${maxJury})</th><th class="r">Тайминг (0–2)</th><th class="r">Итог (из ${maxJury + 2})</th></tr></thead>
+          <tbody>${rows.map(r => `<tr>
+            <td class="place">${place.get(r.perf) ?? '—'}</td>
+            <td><b>${esc(r.institute)}</b>${r.title ? `<div class="small muted">«${esc(r.title)}»</div>` : ''}
+              <details><summary>По судьям и критериям</summary><div class="tablewrap"><table style="font-size:14px;margin-top:6px">
+                <thead><tr><th>Судья</th>${S.criteria.map((c, i) => `<th class="r" title="${esc(c)}">К${i + 1}</th>`).join('')}<th class="r">Σ (из ${maxJury})</th><th></th></tr></thead>
+                <tbody>${r.sheets.map(s => `<tr><td>${esc(s.name)}</td>${s.marks.map(v => `<td class="r">${v ?? '·'}</td>`).join('')}<td class="r"><b>${s.filled ? s.sum : '—'}</b></td><td>${s.submitted ? '✓' : '<span class="muted">не отправлено</span>'}</td></tr>`).join('')}</tbody>
+              </table></div></details></td>
+            <td class="r">${fmt(r.seconds)}</td>
+            <td class="r">${r.done}/${S.jurors.length}</td>
+            <td class="r">${fmtNum(r.avg)}</td>
+            <td class="r">${r.timing == null ? '—' : `<span class="pill ${pillFor(r.timing)}">+${r.timing}</span>`}</td>
+            <td class="r total">${fmtNum(r.total)}</td></tr>`).join('')}</tbody>
+        </table></div>
+      </section>`;
+  }
+
+  const who = id => id === 'admin' ? 'Организатор' : id === 'unknown' ? 'Неизвестный' : (S.jurors.find(j => j.id === id) || { name: id }).name;
+  const perfName = id => (S.perfs.find(p => p.id === id) || { institute: id }).institute;
+  function describe(l) {
+    const c = n => S.criteria[n] || `критерий ${n + 1}`;
+    switch (l.act) {
+      case 'mark': return `${esc(perfName(l.perf))}: «${esc(c(l.crit))}» → ${l.val ?? 'снято'}`;
+      case 'submit': return `<b>${esc(perfName(l.perf))}: отправил оценки, сумма ${l.sum}</b>`;
+      case 'all-submitted': return `<b style="color:var(--good)">${esc(perfName(l.perf))}: ВСЕ судьи отправили оценки · создан полный бэкап</b>`;
+      case 'rejected-locked': return `${esc(perfName(l.perf))}: попытка изменить после отправки — отклонено`;
+      case 'login': return 'вход' + (l.ip ? ` с ${esc(l.ip)}` : '');
+      case 'login-failed': case 'admin-login-failed': return `<span style="color:var(--bad)">неверный ${l.act === 'login-failed' ? 'PIN' : 'пароль'} с ${esc(l.ip)}</span>`;
+      case 'start': return `старт таймера: ${esc(perfName(l.args.perf))}`;
+      case 'stop': return `стоп таймера: ${esc(perfName(l.args.perf))}`;
+      case 'reset': return `сброс таймера: ${esc(perfName(l.args.perf))}`;
+      case 'unlock': return `<b>разрешил исправить: ${esc(perfName(l.args.perf))}, ${esc(who(l.args.juror))}</b>`;
+      case 'setCurrent': return `на сцене: ${esc(perfName(l.args.perf))}`;
+      case 'forceBackup': return `принудительное сохранение резервной копии`;
+      case 'restoreState': return `<b>восстановление состояния из резервной копии</b>`;
+      default: return esc(l.act);
+    }
+  }
+  function journal() {
+    const j = journalData;
+    if (!j) return `<div class="card">Загрузка журнала…</div>`;
+    return `<section class="card">
+      <div class="row"><h3>Журнал действий</h3><span class="spacer"></span>
+        ${j.ok ? `<span class="pill g">Журнал цел · ${j.count} записей</span>` : `<span class="pill b">Журнал изменён вручную! Запись №${j.brokenAt}</span>`}</div>
+      <p class="small muted" style="margin:0">Записывается каждое нажатие судей и каждое действие организатора (защищено цепочкой SHA‑256 хешей). Последние 300, новые сверху.</p>
+      <div class="tablewrap"><table style="font-size:15px"><thead><tr><th>Время</th><th>Кто</th><th>Что</th></tr></thead><tbody>
+        ${j.lines.map(l => `<tr><td class="num">${time(l.t)}</td><td>${esc(who(l.who))}</td><td>${describe(l)}</td></tr>`).join('')}
+      </tbody></table></div></section>`;
+  }
+
+  function setup() {
+    const list = perfs();
+    const b = S.backup;
+    return `
+      <section class="card">
+        <h3>Надёжность и резервное копирование</h3>
+        <div class="small">1. Каждое нажатие сразу атомарно пишется в <code>data/state.json</code> и <code>data/journal.jsonl</code>.</div>
+        <div class="small">2. Автобэкап создаётся: <b>мгновенно при каждой отправке оценок судьёй</b>, <b>после сдачи всеми судьями</b>, <b>каждую минуту при изменениях</b> и <b>гарантированно каждые 15 минут</b>.</div>
+        <div class="small">Последняя копия на сервере: <b>${time(b.local)}</b> ${b.lastReason ? `<span class="muted">(${esc(b.lastReason)})</span>` : ''}</div>
+        <div class="small">Копия на флешку: ${b.dir ? (b.externalError ? `<span style="color:var(--bad)">ошибка: ${esc(b.externalError)}</span>` : `<b>${time(b.external)}</b> → ${esc(b.dir)}`) : '<span class="muted">флешка не обнаружена (вставьте флешку — подхватится автоматически)</span>'}</div>
+        <div class="row">
+          <button class="btn sm primary" data-act="forcebackup">Сделать бэкап сейчас</button>
+          <a class="btn sm" href="/export/backup.json?token=${encodeURIComponent(token)}" style="text-decoration:none;display:inline-flex;align-items:center">Скачать файл копии (state.json)</a>
+          <label class="btn sm" style="display:inline-flex;align-items:center;cursor:pointer">
+            Восстановить из копии (state.json)
+            <input type="file" id="restore-file" accept=".json,application/json" hidden>
+          </label>
+        </div>
+      </section>
+      <section class="card">
+        <div class="row"><h3>Критерии ЗКНП и тайминг</h3><span class="spacer"></span>
+          <button class="btn sm" data-act="resetcrit" data-arm>Сбросить на стандартные критерии ЗКНП</button>
+        </div>
+        <div class="list">${S.criteria.map((c, i) => `<div class="listrow"><span class="crit-n">${i + 1}</span><input type="text" id="crit-${i}" value="${esc(c)}">
+          <button class="btn sm" data-rmcrit="${i}" ${S.criteria.length <= 1 ? 'disabled' : ''} aria-label="Убрать">✕</button></div>`).join('')}</div>
+        <div class="row"><button class="btn sm" data-act="addcrit">+ Критерий</button></div>
+        <div class="grid2">
+          <label class="f">2 балла, если до (минут включительно)<input type="number" id="lim" min="1" value="${S.limitMin}"></label>
+          <label class="f">1 балл, если до (минут включительно; свыше — 0)<input type="number" id="hard" min="1" value="${S.hardMin}"></label>
+        </div>
+        <div class="row"><button class="btn primary" data-act="savecfg">Сохранить критерии и тайминг</button></div>
+      </section>
+      <section class="card">
+        <h3>Судьи</h3>
+        <div class="list">${S.jurors.map(j => `<div class="listrow"><input type="text" id="jn-${j.id}" value="${esc(j.name)}">
+          <button class="btn sm" data-renjur="${j.id}">Сохранить</button>
+          <button class="btn sm danger" data-deljur="${j.id}" data-arm>Удалить</button></div>`).join('')}</div>
+        <div class="row"><button class="btn sm" data-act="addjur">+ Судья</button></div>
+      </section>
+      <section class="card">
+        <h3>Постановки</h3>
+        <div class="list">${list.map((p, i) => `<div class="perfrow">
+          <div class="grid2"><label class="f">Институт<input type="text" id="pi-${p.id}" value="${esc(p.institute)}"></label>
+            <label class="f">Название<input type="text" id="pt-${p.id}" value="${esc(p.title)}"></label></div>
+          <label class="f">Описание<textarea id="pd-${p.id}">${esc(p.description)}</textarea></label>
+          <div class="row"><span class="muted small">№ ${i + 1}</span>
+            <button class="btn sm" data-move="${p.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button class="btn sm" data-move="${p.id}" data-dir="1" ${i === list.length - 1 ? 'disabled' : ''}>↓</button>
+            <span class="spacer"></span>
+            <button class="btn sm danger" data-delperf="${p.id}" data-arm>Удалить</button>
+            <button class="btn sm primary" data-saveperf="${p.id}">Сохранить</button></div></div>`).join('')}
+          <div class="perfrow" style="border-style:dashed">
+            <div class="grid2"><label class="f">Институт<input type="text" id="pi-new"></label><label class="f">Название<input type="text" id="pt-new"></label></div>
+            <label class="f">Описание<textarea id="pd-new"></textarea></label>
+            <div class="row"><button class="btn primary" data-saveperf="new">Добавить постановку</button></div></div>
+        </div>
+      </section>
+      <section class="card">
+        <h3>Перед конкурсом</h3>
+        <p class="small muted" style="margin:0">Стирает все оценки и время после репетиции. Копия текущих данных автоматически сохраняется перед стиранием.</p>
+        <div class="row"><button class="btn danger" data-act="clear" data-arm>Стереть все оценки и время</button></div>
+      </section>`;
+  }
+
+  function tick() {
+    if (!S) return;
+    document.querySelectorAll('[data-clock]').forEach(el => {
+      const p = S.perfs.find(x => x.id === el.dataset.clock);
+      if (p && p.startedAt && !p.endedAt) el.textContent = fmt(elapsed(p));
+    });
+  }
+  setInterval(tick, 250);
+
+  const val = id => (document.getElementById(id) || {}).value || '';
+  function cfgFromForm(criteria) {
+    return { type: 'saveConfig', criteria: criteria || S.criteria.map((c, i) => val('crit-' + i).trim() || c), limitMin: +val('lim'), hardMin: +val('hard') };
+  }
+
+  let armed = null;
+  view.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    if (b.hasAttribute('data-arm')) {
+      if (armed !== b) {
+        if (armed && armed.isConnected) { armed.classList.remove('armed'); armed.textContent = armed.dataset.label; }
+        armed = b; b.dataset.label = b.textContent; b.classList.add('armed'); b.textContent = 'Точно? Нажмите ещё раз';
+        setTimeout(() => { if (armed === b) { b.classList.remove('armed'); b.textContent = b.dataset.label; armed = null; lastHtml = ''; } }, 4000);
+        return;
+      }
+      armed = null; lastHtml = '';
+    }
+    const d = b.dataset;
+    const p = S && cur();
+    if (d.cur) return act({ type: 'setCurrent', perf: d.cur });
+    if (d.t) return act({ type: d.t, perf: p.id });
+    if (d.unlock) return act({ type: 'unlock', perf: d.perf, juror: d.unlock });
+    if (d.logout) return act({ type: 'logoutJuror', id: d.logout });
+    if (d.newpin) return act({ type: 'newPin', id: d.newpin });
+    if (d.renjur) return act({ type: 'renameJuror', id: d.renjur, name: val('jn-' + d.renjur).trim() });
+    if (d.deljur) return act({ type: 'deleteJuror', id: d.deljur });
+    if (d.act === 'addjur') return act({ type: 'addJuror' });
+    if (d.act === 'forcebackup') return act({ type: 'forceBackup' });
+    if (d.act === 'resetcrit') return act({ type: 'resetDefaultCriteria' });
+    if (d.act === 'addcrit') return act(cfgFromForm([...S.criteria.map((c, i) => val('crit-' + i).trim() || c), `Критерий ${S.criteria.length + 1}`]));
+    if (d.rmcrit != null) { const c = S.criteria.map((x, i) => val('crit-' + i).trim() || x); c.splice(+d.rmcrit, 1); return act(cfgFromForm(c)); }
+    if (d.act === 'savecfg') return act(cfgFromForm());
+    if (d.saveperf) {
+      const k = d.saveperf;
+      if (k === 'new' && !val('pi-new').trim()) return document.getElementById('pi-new').focus();
+      return act({ type: 'savePerf', id: k === 'new' ? undefined : k, institute: val('pi-' + k).trim(), title: val('pt-' + k).trim(), description: val('pd-' + k).trim() });
+    }
+    if (d.delperf) return act({ type: 'deletePerf', id: d.delperf });
+    if (d.move) return act({ type: 'movePerf', id: d.move, dir: +d.dir });
+    if (d.act === 'clear') return act({ type: 'clearAll', confirm: 'СТЕРЕТЬ' });
+  });
+  view.addEventListener('change', async e => {
+    if (e.target && e.target.id === 'restore-file' && e.target.files[0]) {
+      try {
+        const text = await e.target.files[0].text();
+        const data = JSON.parse(text);
+        await act({ type: 'restoreState', data });
+        alertMsg('Данные успешно восстановлены из копии!');
+      } catch (err) {
+        alertMsg('Ошибка чтения файла копии: ' + err.message);
+      }
+    }
+  });
+  view.addEventListener('input', e => {
+    if (e.target && e.target.id === 'restore-file') return;
+    if (tab === 'setup') setupDirty = true;
+  });
+  view.addEventListener('submit', async e => {
+    e.preventDefault();
+    try { const r = await api('/api/admin/login', { password: val('pw') }); token = r.token; ls.set('adminToken', token); loginErr = ''; }
+    catch (err) { loginErr = err.status ? err.message : 'Сервер не отвечает'; }
+    lastHtml = ''; refresh();
+  });
+  tabs.addEventListener('click', e => {
+    const b = e.target.closest('button[data-tab]'); if (!b) return;
+    tab = b.dataset.tab; ls.set('adminTab', tab); setupDirty = false; journalData = null; lastHtml = ''; window.scrollTo(0, 0);
+    render(); refresh();
+  });
+  refresh();
+})();
+</script>
+</body>
+</html>

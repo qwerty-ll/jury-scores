@@ -1,0 +1,12 @@
+{
+  "name": "jury-scores-zknp",
+  "version": "1.0.0",
+  "description": "Система оценивания выступлений жюри ЗКНП (30 баллов по 6 критериям + 0..2 балла за тайминг = 32 балла)",
+  "main": "jury-server/server.js",
+  "scripts": {
+    "start": "node jury-server/server.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

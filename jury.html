@@ -1,0 +1,639 @@
+<title>Оценки жюри</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap">
+<style>
+/* Layout: one calm column, huge touch targets; the jury tablet screen is the hero, the organizer tools sit behind tabs. */
+:root {
+  --bg: #f3f4f7;
+  --surface: #ffffff;
+  --fg: #1b1d24;
+  --muted: #5d6170;
+  --line: #d9dbe3;
+  --accent: #8a1c3b;          /* stage curtain */
+  --accent-soft: #f6e6eb;
+  --on-accent: #ffffff;
+  --good: #1f7a4a;
+  --good-soft: #e3f3ea;
+  --warn: #9a6100;
+  --warn-soft: #fbf0db;
+  --bad: #b3261e;
+  --bad-soft: #fbe5e3;
+  --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --r: 14px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #15161b; --surface: #1f2128; --fg: #eceef3; --muted: #a2a6b4; --line: #343743;
+  --accent: #e0607f; --accent-soft: #3a1d26; --on-accent: #1a0b10;
+  --good: #5fcf92; --good-soft: #17301f; --warn: #f0b552; --warn-soft: #33270f; --bad: #f2857c; --bad-soft: #3a1b18;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #15161b; --surface: #1f2128; --fg: #eceef3; --muted: #a2a6b4; --line: #343743;
+  --accent: #e0607f; --accent-soft: #3a1d26; --on-accent: #1a0b10;
+  --good: #5fcf92; --good-soft: #17301f; --warn: #f0b552; --warn-soft: #33270f; --bad: #f2857c; --bad-soft: #3a1b18;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 18px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px;
+}
+.wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Top bar */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+header.top {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  padding-block: 12px; border-bottom: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+}
+.brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: .01em; }
+nav.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+nav.tabs a {
+  text-decoration: none; color: var(--muted); font-size: 15px; font-weight: 600;
+  padding: 7px 12px; border-radius: 999px; border: 1px solid transparent;
+}
+nav.tabs a[aria-current="page"] { color: var(--accent); background: var(--accent-soft); }
+.mode { font-size: 14px; padding: 10px 14px; border-radius: var(--r); background: var(--warn-soft); color: var(--warn); }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.eyebrow { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.muted { color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.spacer { flex: 1; }
+
+.btn {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 12px;
+  padding: 12px 18px; font-weight: 600; min-height: 52px;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.danger { color: var(--bad); border-color: var(--bad); background: transparent; }
+.btn.danger.armed { background: var(--bad); color: var(--surface); }
+.btn.small { min-height: 40px; padding: 8px 12px; font-size: 15px; }
+.btn:disabled { opacity: .45; cursor: default; }
+.linkbtn { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 4px; text-decoration: underline; text-underline-offset: 3px; }
+
+/* Juror picker */
+.pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.pick button { min-height: 84px; font-size: 22px; font-weight: 600; border-radius: var(--r); border: 2px solid var(--line); background: var(--surface); }
+
+/* Performance header on jury screen */
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.chips button {
+  flex: none; border: 1px solid var(--line); background: var(--surface); border-radius: 999px;
+  padding: 8px 14px; font-size: 15px; font-weight: 600; white-space: nowrap;
+}
+.chips button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.chips .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-left: 6px; vertical-align: middle; }
+.perf-inst { font-family: var(--font-display); font-weight: 700; font-size: clamp(24px, 5vw, 34px); line-height: 1.15; }
+.perf-title { font-size: 22px; font-weight: 600; }
+.perf-desc { color: var(--muted); max-width: 62ch; }
+
+/* Timer */
+.timer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 14px 18px; border-radius: 12px; background: var(--bg); }
+.clock { font-family: var(--font-display); font-weight: 500; font-size: 40px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.clock.big { font-size: clamp(56px, 14vw, 96px); }
+.pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 12px; font-size: 15px; font-weight: 600; }
+.pill.g { background: var(--good-soft); color: var(--good); }
+.pill.w { background: var(--warn-soft); color: var(--warn); }
+.pill.b { background: var(--bad-soft); color: var(--bad); }
+.pill.n { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+
+/* Criteria */
+.crit { display: flex; flex-direction: column; gap: 12px; padding-block: 18px; border-top: 1px solid var(--line); }
+.crit:first-child { border-top: 0; padding-top: 4px; }
+.crit-head { display: flex; gap: 12px; align-items: baseline; }
+.crit-n { font-family: var(--font-display); color: var(--muted); font-size: 15px; min-width: 1.6em; }
+.crit-name { font-size: 21px; font-weight: 600; flex: 1; min-width: 0; }
+.scale { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.scale button {
+  min-height: 68px; border-radius: 12px; border: 2px solid var(--line); background: var(--surface);
+  font-family: var(--font-display); font-size: 26px; font-weight: 500; font-variant-numeric: tabular-nums;
+}
+.scale button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.sumbar {
+  position: sticky; bottom: 0; z-index: 4;
+  padding: 14px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r) var(--r) 0 0;
+  display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between;
+}
+.sumbar b { font-family: var(--font-display); font-size: 24px; }
+.saved { font-size: 15px; color: var(--good); font-weight: 600; }
+
+/* Tables */
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 16px; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; }
+.total { font-family: var(--font-display); font-weight: 700; font-size: 20px; }
+.place { font-family: var(--font-display); font-weight: 700; color: var(--accent); }
+details summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: 15px; }
+
+/* Setup form */
+label.f { display: flex; flex-direction: column; gap: 6px; font-size: 15px; font-weight: 600; color: var(--muted); min-width: 0; }
+input[type=text], input[type=number], textarea {
+  border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 10px 12px; font-size: 17px; width: 100%; min-width: 0;
+}
+textarea { resize: vertical; min-height: 64px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.list { display: flex; flex-direction: column; gap: 10px; }
+.listrow { display: flex; gap: 8px; align-items: center; }
+.listrow input { flex: 1; }
+.perfrow { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.rule { font-size: 15px; color: var(--muted); }
+.rule b { color: var(--fg); }
+.empty { text-align: center; padding: 36px 20px; color: var(--muted); }
+.empty h2 { color: var(--fg); font-size: 22px; margin-bottom: 8px; }
+@media (prefers-reduced-motion: no-preference) {
+  .scale button { transition: background .12s, border-color .12s, transform .08s; }
+  .scale button:active { transform: scale(.96); }
+}
+@media (max-width: 480px) {
+  .scale { gap: 6px; }
+  .scale button { min-height: 58px; font-size: 22px; }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">Оценки жюри</div>
+    <nav class="tabs" aria-label="Разделы">
+      <a href="#jury" data-view="jury">Жюри</a>
+      <a href="#timer" data-view="timer">Таймер</a>
+      <a href="#results" data-view="results">Итоги</a>
+      <a href="#setup" data-view="setup">Настройка</a>
+    </nav>
+  </header>
+  <div id="mode" class="mode" hidden></div>
+  <main id="view" class="wrap" style="max-width:none"></main>
+</div>
+
+<script>
+(() => {
+  // ---------- Config & helpers ----------
+  const DEFAULT_CFG = {
+    criteria: [
+      "Идея и сценарий (Цельность замысла, связь с темой, логика сюжета)",
+      "Актерское мастерство (Выразительность, сценическая речь, уверенность на сцене)",
+      "Музыкальное оформление (Музыка, её связь с сюжетом)",
+      "Визуальное оформление (Декорации и свет, их связь с сюжетом)",
+      "Костюмы и образы (Соответствие персонажам и сюжету)",
+      "Общее впечатление (Эмоциональный отклик, запоминаемость)"
+    ],
+    jurors: [{ id: "j1", name: "Жюри 1" }, { id: "j2", name: "Жюри 2" }, { id: "j3", name: "Жюри 3" }],
+    limitMin: 15, // до этого времени — 2 балла
+    hardMin: 17,  // до этого — 1 балл, дальше — 0
+    current: null
+  };
+  const MAX_MARK = 5;
+  const S = { cfg: null, perfs: {}, scores: {}, ready: false };
+  const cfg = () => Object.assign({}, DEFAULT_CFG, S.cfg || {});
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const ls = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} }
+  };
+  const fmt = sec => {
+    if (sec == null) return "--:--";
+    sec = Math.max(0, Math.floor(sec));
+    return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(sec % 60).padStart(2, "0");
+  };
+  const fmtNum = n => n == null ? "—" : (Math.round(n * 100) / 100).toLocaleString("ru-RU");
+  const perfList = () => Object.entries(S.perfs).map(([id, p]) => ({ id, ...p })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const elapsed = p => p.startedAt ? ((p.endedAt || Date.now()) - p.startedAt) / 1000 : null;
+  function timingPoints(sec, c = cfg()) {
+    if (sec == null) return null;
+    if (sec < c.limitMin * 60) return 2;
+    if (sec < c.hardMin * 60) return 1;
+    return 0;
+  }
+  const pillFor = pts => pts == null ? "n" : pts === 2 ? "g" : pts === 1 ? "w" : "b";
+  const ptsWord = n => n === 1 ? "балл" : (n >= 2 && n <= 4) ? "балла" : "баллов";
+
+  // Итог: среднее арифметическое сумм полностью заполненных листов + баллы за тайминг
+  function perfResult(p) {
+    const c = cfg(), n = c.criteria.length;
+    const sheets = c.jurors.map(j => {
+      const s = S.scores[p.id + "__" + j.id];
+      const marks = (s && Array.isArray(s.marks)) ? s.marks.slice(0, n) : [];
+      const filled = marks.filter(v => typeof v === "number").length;
+      return { juror: j, marks, filled, sum: marks.reduce((a, v) => a + (typeof v === "number" ? v : 0), 0), complete: filled === n };
+    });
+    const done = sheets.filter(s => s.complete);
+    const avg = done.length ? done.reduce((a, s) => a + s.sum, 0) / done.length : null;
+    const tp = p.endedAt ? timingPoints(elapsed(p), c) : null;
+    return { sheets, done: done.length, avg, tp, total: avg == null ? null : avg + (tp ?? 0) };
+  }
+
+  // ---------- Storage: shared db, or this device only ----------
+  let backend = null;
+  const queues = {};
+  function write(path, data) {
+    // one write at a time per document; the latest value wins
+    const q = queues[path] || (queues[path] = { busy: false, next: undefined });
+    q.next = data;
+    if (q.busy) return;
+    const run = async () => {
+      q.busy = true;
+      while (q.next !== undefined) {
+        const d = q.next; q.next = undefined;
+        try { await (d === null ? backend.del(path) : backend.set(path, d)); }
+        catch (e) { showMode("Не удалось сохранить: " + (e && e.message || e)); }
+      }
+      q.busy = false;
+    };
+    run();
+  }
+  function applyLocal(path, data) {
+    const [col, id] = path.split("/");
+    if (col === "config") S.cfg = data;
+    else {
+      const bag = col === "perfs" ? S.perfs : S.scores;
+      if (data === null) delete bag[id]; else bag[id] = data;
+    }
+  }
+  const put = (path, data) => { applyLocal(path, data); write(path, data); render(); };
+
+  function showMode(text) { const m = document.getElementById("mode"); m.textContent = text; m.hidden = !text; }
+
+  function startLocal() {
+    const KEY = "jury-local-v1";
+    const load = () => {
+      let d = null; try { d = JSON.parse(ls.get(KEY) || "null"); } catch {}
+      d = d || {};
+      S.cfg = d.cfg || null; S.perfs = d.perfs || {}; S.scores = d.scores || {};
+    };
+    const save = () => ls.set(KEY, JSON.stringify({ cfg: S.cfg, perfs: S.perfs, scores: S.scores }));
+    load();
+    backend = { set: async () => save(), del: async () => save() };
+    window.addEventListener("storage", e => { if (e.key === KEY) { load(); render(); } });
+    showMode("Демо-режим: оценки хранятся только на этом устройстве. Чтобы планшеты видели общие данные, откройте страницу, войдя в claude.ai.");
+    S.ready = true; render();
+  }
+
+  async function startShared(db) {
+    backend = { set: (p, d) => db.doc(p).set(d), del: p => db.doc(p).delete() };
+    const fail = e => showMode("Нет связи с общей базой (" + (e && e.code) + "). Обновите страницу.");
+    let got = 0; const mark = () => { if (++got >= 3 && !S.ready) { S.ready = true; } render(); };
+    db.doc("config/main").onSnapshot(s => { S.cfg = s.exists ? s.data() : null; mark(); }, fail);
+    const bagSub = (col, key) => db.collection(col).onSnapshot(q => {
+      const bag = {};
+      q.docs.forEach(d => { bag[d.id] = d.data(); });
+      // keep this tablet's unsent marks visible until the store confirms them
+      Object.keys(queues).forEach(p => { const [c, id] = p.split("/"); if (c === col && queues[p].busy && S[key][id]) bag[id] = S[key][id]; });
+      S[key] = bag; mark();
+    }, fail);
+    bagSub("perfs", "perfs");
+    bagSub("scores", "scores");
+  }
+
+  // ---------- Views ----------
+  const view = document.getElementById("view");
+  let current = "jury";
+  let jurorId = ls.get("jury-me");
+  let selPerf = null, lastCurrent = null, savedAt = 0;
+  let setupDirty = false;
+
+  function render() {
+    document.querySelectorAll("nav.tabs a").forEach(a => a.setAttribute("aria-current", a.dataset.view === current ? "page" : "false"));
+    if (!S.ready) { view.innerHTML = `<div class="card empty"><h2>Загрузка…</h2></div>`; return; }
+    if (current === "setup" && setupDirty) return; // don't wipe what the organizer is typing
+    ({ jury: renderJury, timer: renderTimer, results: renderResults, setup: renderSetup })[current]();
+  }
+
+  function noPerfs(where) {
+    return `<div class="card empty"><h2>Пока нет постановок</h2>
+      <p>Добавьте институты и названия постановок во вкладке «Настройка»${where === "setup" ? "" : ""}.</p>
+      <p><a class="btn primary" href="#setup" style="display:inline-flex;align-items:center;text-decoration:none">Открыть настройку</a></p></div>`;
+  }
+
+  function timerBlock(p, big) {
+    const sec = elapsed(p);
+    const c = cfg();
+    const state = !p.startedAt ? `<span class="pill n">Ещё не началась</span>`
+      : !p.endedAt ? `<span class="pill ${pillFor(timingPoints(sec))}">● Идёт</span>`
+      : `<span class="pill ${pillFor(timingPoints(sec))}">Завершена · ${timingPoints(sec)} ${ptsWord(timingPoints(sec))} за время</span>`;
+    return `<div class="timer"><span class="clock ${big ? "big" : ""}" data-clock="${p.id}">${fmt(sec)}</span>
+      <div class="row">${state}<span class="muted" style="font-size:15px">лимит ${c.limitMin} мин</span></div></div>`;
+  }
+
+  function renderJury() {
+    const c = cfg();
+    const me = c.jurors.find(j => j.id === jurorId);
+    if (!me) {
+      view.innerHTML = `<div class="card"><h2 class="perf-title">Кто оценивает на этом планшете?</h2>
+        <p class="muted" style="margin:0">Выберите себя один раз — планшет запомнит.</p>
+        <div class="pick">${c.jurors.map(j => `<button data-me="${esc(j.id)}">${esc(j.name)}</button>`).join("")}</div></div>`;
+      return;
+    }
+    const list = perfList();
+    if (!list.length) { view.innerHTML = noPerfs(); return; }
+    if (c.current !== lastCurrent) { lastCurrent = c.current; if (c.current && S.perfs[c.current]) selPerf = c.current; }
+    if (!selPerf || !S.perfs[selPerf]) selPerf = (c.current && S.perfs[c.current]) ? c.current : list[0].id;
+    const p = list.find(x => x.id === selPerf);
+    const sheet = S.scores[p.id + "__" + me.id];
+    const marks = (sheet && sheet.marks) || [];
+    const n = c.criteria.length;
+    const filled = c.criteria.filter((_, i) => typeof marks[i] === "number").length;
+    const sum = c.criteria.reduce((a, _, i) => a + (typeof marks[i] === "number" ? marks[i] : 0), 0);
+
+    view.innerHTML = `
+      <div class="row"><span class="muted">Вы: <b style="color:var(--fg)">${esc(me.name)}</b></span>
+        <button class="linkbtn" data-act="change-me">сменить</button></div>
+      <div class="chips" role="group" aria-label="Постановки">${list.map((x, i) => `<button data-perf="${x.id}" aria-pressed="${x.id === p.id}">${i + 1}. ${esc(x.institute || "Без названия")}${x.id === c.current && x.startedAt && !x.endedAt ? '<span class="dot" aria-label="идёт сейчас"></span>' : ""}</button>`).join("")}</div>
+      <section class="card">
+        <div class="eyebrow">Постановка ${list.indexOf(p) + 1} из ${list.length}</div>
+        <div class="perf-inst">${esc(p.institute)}</div>
+        ${p.title ? `<div class="perf-title">«${esc(p.title)}»</div>` : ""}
+        ${p.description ? `<div class="perf-desc">${esc(p.description)}</div>` : ""}
+        ${timerBlock(p, false)}
+      </section>
+      <section class="card" aria-label="Критерии">
+        ${c.criteria.map((name, i) => `
+          <div class="crit">
+            <div class="crit-head"><span class="crit-n">${i + 1}</span><span class="crit-name">${esc(name)}</span></div>
+            <div class="scale" role="group" aria-label="${esc(name)}">
+              ${Array.from({ length: MAX_MARK + 1 }, (_, v) => `<button data-crit="${i}" data-val="${v}" aria-pressed="${marks[i] === v}">${v}</button>`).join("")}
+            </div>
+          </div>`).join("")}
+      </section>
+      <div class="sumbar">
+        <span>Ваша сумма: <b class="num">${sum}</b> <span class="muted">из ${n * MAX_MARK}</span></span>
+        <span class="${filled === n ? "saved" : "muted"}" style="font-size:15px">${filled === n ? "✓ Все критерии оценены" : `Оценено ${filled} из ${n}`}${savedAt && Date.now() - savedAt < 2500 ? " · сохранено" : ""}</span>
+      </div>`;
+  }
+
+  function renderTimer() {
+    const list = perfList();
+    if (!list.length) { view.innerHTML = noPerfs(); return; }
+    const c = cfg();
+    const cur = list.find(x => x.id === c.current) || list[0];
+    const idx = list.indexOf(cur);
+    const sec = elapsed(cur);
+    view.innerHTML = `
+      <section class="card">
+        <div class="row"><span class="eyebrow">Сейчас выступают · ${idx + 1} из ${list.length}</span><span class="spacer"></span>
+          <button class="btn small" data-go="${idx - 1}" ${idx === 0 ? "disabled" : ""}>← Пред.</button>
+          <button class="btn small" data-go="${idx + 1}" ${idx === list.length - 1 ? "disabled" : ""}>След. →</button></div>
+        <div class="perf-inst">${esc(cur.institute)}</div>
+        ${cur.title ? `<div class="perf-title">«${esc(cur.title)}»</div>` : ""}
+        ${timerBlock(cur, true)}
+        <div class="row">
+          ${!cur.startedAt ? `<button class="btn primary" data-t="start" style="min-width:220px">Начать отсчёт</button>` : ""}
+          ${cur.startedAt && !cur.endedAt ? `<button class="btn primary" data-t="stop" style="min-width:220px">Закончить отсчёт</button>` : ""}
+          ${cur.startedAt ? `<button class="btn danger" data-t="reset" data-arm>Сбросить время</button>` : ""}
+        </div>
+        ${cur.endedAt ? `<div class="rule">Начало ${new Date(cur.startedAt).toLocaleTimeString("ru-RU")}, конец ${new Date(cur.endedAt).toLocaleTimeString("ru-RU")}. Длительность <b class="num">${fmt(sec)}</b>.</div>` : ""}
+        <div class="rule">До ${c.limitMin}:00 — <b>2 балла</b> · от ${c.limitMin}:00 до ${c.hardMin}:00 — <b>1 балл</b> · ${c.hardMin}:00 и больше — <b>0</b></div>
+      </section>
+      <section class="card">
+        <h3>Все постановки</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>#</th><th>Институт</th><th class="r">Время</th><th class="r">Баллы</th><th></th></tr></thead>
+          <tbody>${list.map((x, i) => { const s = elapsed(x), tp = x.endedAt ? timingPoints(s) : null; return `
+            <tr><td class="num">${i + 1}</td><td>${esc(x.institute)}${x.title ? `<div class="muted" style="font-size:14px">«${esc(x.title)}»</div>` : ""}</td>
+            <td class="r"><span data-clock="${x.id}">${x.startedAt ? fmt(s) : "—"}</span></td>
+            <td class="r">${tp == null ? "—" : `<span class="pill ${pillFor(tp)}">${tp}</span>`}</td>
+            <td class="r">${x.id === cur.id ? `<span class="muted" style="font-size:14px">на сцене</span>` : `<button class="btn small" data-go="${i}">Выбрать</button>`}</td></tr>`; }).join("")}</tbody>
+        </table></div>
+      </section>`;
+  }
+
+  function renderResults() {
+    const list = perfList();
+    if (!list.length) { view.innerHTML = noPerfs(); return; }
+    const c = cfg(), n = c.criteria.length;
+    const rows = list.map(p => ({ p, r: perfResult(p) }));
+    const ranked = rows.filter(x => x.r.total != null).sort((a, b) => b.r.total - a.r.total);
+    const place = new Map(); ranked.forEach((x, i) => place.set(x.p.id, i + 1));
+    rows.sort((a, b) => (place.get(a.p.id) ?? 999) - (place.get(b.p.id) ?? 999));
+    view.innerHTML = `
+      <section class="card">
+        <h3>Итоги</h3>
+        <p class="rule" style="margin:0">Итог = среднее арифметическое сумм всех судей (максимум ${n * MAX_MARK}) + баллы за время (0–2). В среднее идут только листы, где оценены все ${n} критериев.</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Место</th><th>Постановка</th><th class="r">Судей</th><th class="r">Среднее</th><th class="r">Время</th><th class="r">Итог</th></tr></thead>
+          <tbody>${rows.map(({ p, r }) => `
+            <tr>
+              <td class="place">${place.get(p.id) ?? "—"}</td>
+              <td>${esc(p.institute)}${p.title ? `<div class="muted" style="font-size:14px">«${esc(p.title)}»</div>` : ""}
+                <details><summary>Оценки по судьям</summary>
+                  <div class="tablewrap"><table style="font-size:14px;margin-top:6px">
+                    <thead><tr><th>Судья</th>${c.criteria.map((_, i) => `<th class="r" title="${esc(c.criteria[i])}">${i + 1}</th>`).join("")}<th class="r">Σ</th></tr></thead>
+                    <tbody>${r.sheets.map(s => `<tr><td>${esc(s.juror.name)}</td>${c.criteria.map((_, i) => `<td class="r">${typeof s.marks[i] === "number" ? s.marks[i] : "·"}</td>`).join("")}<td class="r"><b>${s.filled ? s.sum : "—"}</b>${s.filled && !s.complete ? ' <span class="muted">(не всё)</span>' : ""}</td></tr>`).join("")}</tbody>
+                  </table></div>
+                </details></td>
+              <td class="r">${r.done}/${c.jurors.length}</td>
+              <td class="r">${fmtNum(r.avg)}</td>
+              <td class="r">${r.tp == null ? `<span class="muted">${p.startedAt && !p.endedAt ? "идёт" : "—"}</span>` : `<span class="pill ${pillFor(r.tp)}">+${r.tp}</span>`}</td>
+              <td class="r total">${fmtNum(r.total)}</td>
+            </tr>`).join("")}</tbody>
+        </table></div>
+      </section>`;
+  }
+
+  function renderSetup() {
+    const c = cfg();
+    const list = perfList();
+    view.innerHTML = `
+      <section class="card">
+        <h3>Постановки</h3>
+        <div class="list">${list.map((p, i) => `
+          <div class="perfrow" data-prow="${p.id}">
+            <div class="grid2">
+              <label class="f">Институт<input type="text" id="pi-${p.id}" value="${esc(p.institute)}"></label>
+              <label class="f">Название постановки<input type="text" id="pt-${p.id}" value="${esc(p.title)}"></label>
+            </div>
+            <label class="f">Кратко о постановке (необязательно)<textarea id="pd-${p.id}">${esc(p.description)}</textarea></label>
+            <div class="row">
+              <span class="muted num" style="font-size:15px">№ ${i + 1}</span>
+              <button class="btn small" data-move="${p.id}" data-dir="-1" ${i === 0 ? "disabled" : ""} aria-label="Выше">↑</button>
+              <button class="btn small" data-move="${p.id}" data-dir="1" ${i === list.length - 1 ? "disabled" : ""} aria-label="Ниже">↓</button>
+              <span class="spacer"></span>
+              <button class="btn small danger" data-delperf="${p.id}" data-arm>Удалить</button>
+              <button class="btn small primary" data-saveperf="${p.id}">Сохранить</button>
+            </div>
+          </div>`).join("") || `<p class="muted" style="margin:0">Пока пусто. Добавьте первую постановку ниже${list.length ? "" : " или загрузите пример, чтобы посмотреть, как всё работает"}.</p>`}
+        </div>
+        <div class="perfrow" style="border-style:dashed">
+          <div class="grid2">
+            <label class="f">Институт<input type="text" id="new-inst" placeholder="Например, Институт физики"></label>
+            <label class="f">Название постановки<input type="text" id="new-title"></label>
+          </div>
+          <label class="f">Кратко о постановке (необязательно)<textarea id="new-desc"></textarea></label>
+          <div class="row"><button class="btn primary" data-act="addperf">Добавить постановку</button>
+            ${list.length ? "" : `<button class="btn" data-act="sample">Загрузить пример</button>`}</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Критерии оценки</h3>
+        <p class="rule" style="margin:0">Каждый критерий судьи оценивают от 0 до ${MAX_MARK}.</p>
+        <div class="list" id="crit-list">${c.criteria.map((name, i) => `
+          <div class="listrow"><span class="crit-n">${i + 1}</span><input type="text" id="crit-${i}" value="${esc(name)}">
+            <button class="btn small" data-rmcrit="${i}" aria-label="Убрать критерий" ${c.criteria.length <= 1 ? "disabled" : ""}>✕</button></div>`).join("")}</div>
+        <div class="row"><button class="btn small" data-act="addcrit">+ Критерий</button></div>
+      </section>
+
+      <section class="card">
+        <h3>Жюри</h3>
+        <div class="list">${c.jurors.map((j, i) => `
+          <div class="listrow"><input type="text" id="jur-${esc(j.id)}" value="${esc(j.name)}">
+            <button class="btn small" data-rmjur="${esc(j.id)}" aria-label="Убрать судью" ${c.jurors.length <= 1 ? "disabled" : ""}>✕</button></div>`).join("")}</div>
+        <div class="row"><button class="btn small" data-act="addjur">+ Судья</button></div>
+      </section>
+
+      <section class="card">
+        <h3>Тайминг</h3>
+        <div class="grid2">
+          <label class="f">2 балла, если меньше (мин)<input type="number" id="lim" min="1" max="120" value="${c.limitMin}"></label>
+          <label class="f">1 балл, если меньше (мин)<input type="number" id="hard" min="1" max="120" value="${c.hardMin}"></label>
+        </div>
+        <p class="rule" style="margin:0">Иначе — 0 баллов. Время засекает организатор во вкладке «Таймер».</p>
+      </section>
+
+      <div class="row"><button class="btn primary" data-act="savecfg">Сохранить критерии, жюри и тайминг</button>
+        <span class="spacer"></span>
+        <button class="btn danger" data-act="clearscores" data-arm>Стереть все оценки и время</button></div>`;
+  }
+
+  // ---------- Actions ----------
+  function readCfgForm() {
+    const c = cfg();
+    const criteria = c.criteria.map((_, i) => (document.getElementById("crit-" + i)?.value || "").trim() || `Критерий ${i + 1}`);
+    const jurors = c.jurors.map(j => ({ id: j.id, name: (document.getElementById("jur-" + j.id)?.value || "").trim() || j.name }));
+    let limitMin = +document.getElementById("lim").value || c.limitMin;
+    let hardMin = +document.getElementById("hard").value || c.hardMin;
+    if (hardMin < limitMin) hardMin = limitMin;
+    return { ...c, criteria, jurors, limitMin, hardMin };
+  }
+  const saveCfg = next => { setupDirty = false; put("config/main", next); };
+
+  function setCurrent(id) { put("config/main", { ...cfg(), current: id }); }
+
+  let armed = null;
+  view.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    // two-step confirmation for destructive buttons
+    if (b.hasAttribute("data-arm")) {
+      if (armed !== b) {
+        if (armed) { armed.classList.remove("armed"); armed.textContent = armed.dataset.label; }
+        armed = b; b.dataset.label = b.textContent; b.classList.add("armed"); b.textContent = "Точно? Нажмите ещё раз";
+        setTimeout(() => { if (armed === b) { b.classList.remove("armed"); b.textContent = b.dataset.label; armed = null; } }, 4000);
+        return;
+      }
+      armed = null;
+    }
+    const d = b.dataset;
+    const c = cfg();
+    if (d.me) { jurorId = d.me; ls.set("jury-me", jurorId); wake(); render(); window.scrollTo(0, 0); return; }
+    if (d.act === "change-me") { jurorId = null; ls.set("jury-me", ""); render(); return; }
+    if (d.perf) { selPerf = d.perf; render(); return; }
+    if (d.crit != null && d.val != null) {
+      const me = c.jurors.find(j => j.id === jurorId); if (!me) return;
+      const key = selPerf + "__" + me.id;
+      const marks = (S.scores[key]?.marks || []).slice();
+      const v = +d.val, i = +d.crit;
+      marks[i] = marks[i] === v ? null : v;
+      for (let k = 0; k < c.criteria.length; k++) if (marks[k] === undefined) marks[k] = null;
+      savedAt = Date.now();
+      put("scores/" + key, { perf: selPerf, juror: me.id, marks, at: Date.now() });
+      setTimeout(() => current === "jury" && render(), 2600);
+      wake();
+      return;
+    }
+    if (d.go != null) { const p = perfList()[+d.go]; if (p) setCurrent(p.id); return; }
+    if (d.t) {
+      const list = perfList();
+      const cur = list.find(x => x.id === c.current) || list[0]; if (!cur) return;
+      const { id, ...p } = cur;
+      if (d.t === "start") { put("perfs/" + id, { ...p, startedAt: Date.now(), endedAt: null }); if (c.current !== id) setCurrent(id); }
+      if (d.t === "stop") put("perfs/" + id, { ...p, endedAt: Date.now() });
+      if (d.t === "reset") put("perfs/" + id, { ...p, startedAt: null, endedAt: null });
+      return;
+    }
+    if (d.saveperf) {
+      const id = d.saveperf, p = S.perfs[id];
+      put("perfs/" + id, { ...p, institute: document.getElementById("pi-" + id).value.trim(), title: document.getElementById("pt-" + id).value.trim(), description: document.getElementById("pd-" + id).value.trim() });
+      setupDirty = false; render(); return;
+    }
+    if (d.delperf) { put("perfs/" + d.delperf, null); setupDirty = false; render(); return; }
+    if (d.move) {
+      const list = perfList(), i = list.findIndex(x => x.id === d.move), j = i + +d.dir;
+      if (j < 0 || j >= list.length) return;
+      const a = list[i], z = list[j];
+      const strip = ({ id, ...rest }) => rest;
+      put("perfs/" + a.id, { ...strip(a), order: z.order }); put("perfs/" + z.id, { ...strip(z), order: a.order });
+      setupDirty = false; render(); return;
+    }
+    if (d.act === "addperf") {
+      const inst = document.getElementById("new-inst").value.trim();
+      if (!inst) { document.getElementById("new-inst").focus(); return; }
+      const list = perfList();
+      put("perfs/" + uid("p"), { order: (list.length ? Math.max(...list.map(x => x.order || 0)) : 0) + 1, institute: inst, title: document.getElementById("new-title").value.trim(), description: document.getElementById("new-desc").value.trim(), startedAt: null, endedAt: null });
+      setupDirty = false; render(); document.getElementById("new-inst")?.focus(); return;
+    }
+    if (d.act === "sample") {
+      [["Институт физики (пример)", "Сон в летнюю ночь", "Комедия о путанице влюблённых — пример для проверки."],
+       ["Институт экономики (пример)", "Вишнёвый сад", "Пример карточки постановки."],
+       ["Институт филологии (пример)", "Ревизор", ""]].forEach((x, i) =>
+        put("perfs/" + uid("p"), { order: i + 1, institute: x[0], title: x[1], description: x[2], startedAt: null, endedAt: null }));
+      setupDirty = false; render(); return;
+    }
+    if (d.act === "addcrit") { const n = readCfgForm(); n.criteria.push(`Критерий ${n.criteria.length + 1}`); saveCfg(n); return; }
+    if (d.rmcrit != null) { const n = readCfgForm(); n.criteria.splice(+d.rmcrit, 1); saveCfg(n); return; }
+    if (d.act === "addjur") { const n = readCfgForm(); n.jurors.push({ id: uid("j"), name: `Жюри ${n.jurors.length + 1}` }); saveCfg(n); return; }
+    if (d.rmjur) { const n = readCfgForm(); n.jurors = n.jurors.filter(j => j.id !== d.rmjur); saveCfg(n); return; }
+    if (d.act === "savecfg") { saveCfg(readCfgForm()); return; }
+    if (d.act === "clearscores") {
+      Object.keys(S.scores).forEach(k => put("scores/" + k, null));
+      perfList().forEach(({ id, ...p }) => put("perfs/" + id, { ...p, startedAt: null, endedAt: null }));
+      setupDirty = false; render(); return;
+    }
+  });
+  view.addEventListener("input", () => { if (current === "setup") setupDirty = true; });
+
+  // live clocks
+  setInterval(() => {
+    document.querySelectorAll("[data-clock]").forEach(el => {
+      const p = S.perfs[el.dataset.clock];
+      if (p && p.startedAt && !p.endedAt) el.textContent = fmt(elapsed(p));
+    });
+  }, 500);
+
+  // keep the jury tablet screen on
+  let lock = null;
+  async function wake() { try { if (!lock && navigator.wakeLock) { lock = await navigator.wakeLock.request("screen"); lock.addEventListener("release", () => { lock = null; }); } } catch {} }
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && current === "jury" && jurorId) wake(); });
+
+  function route() {
+    const h = location.hash.slice(1);
+    current = ["jury", "timer", "results", "setup"].includes(h) ? h : "jury";
+    setupDirty = false;
+    render();
+  }
+  window.addEventListener("hashchange", route);
+  document.querySelectorAll("nav.tabs a").forEach(a => a.addEventListener("click", e => {
+    e.preventDefault(); history.replaceState(null, "", "#" + a.dataset.view); route(); window.scrollTo(0, 0);
+  }));
+
+  route();
+  (async () => {
+    let db = null;
+    try { db = window.claude && window.claude.use ? await window.claude.use("db") : null; } catch {}
+    if (db) startShared(db); else startLocal();
+  })();
+})();
+</script>
