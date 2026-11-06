@@ -493,6 +493,9 @@ const server = http.createServer(async (req, res) => {
       const type = file.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8';
       return send(res, 200, fs.readFileSync(file), type);
     }
+    if (req.method === 'GET' && p === '/api/ping') {
+      return send(res, 200, { app: 'jury-zknp', ok: true, port: PORT });
+    }
 
     // --- судья ---
     if (req.method === 'POST' && p === '/api/login') {
