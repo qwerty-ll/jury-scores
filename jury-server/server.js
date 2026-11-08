@@ -76,23 +76,86 @@ function defaultState() {
 }
 
 // ---------- Хранение ----------
+const sleepSync = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+// На Windows антивирус или индексатор может на миг занять файл — тогда повторяем
+function renameRetry(from, to) {
+  for (let i = 0; ; i++) {
+    try { fs.renameSync(from, to); return; }
+    catch (e) {
+      if (i >= 40 || !['EPERM', 'EBUSY', 'EACCES'].includes(e.code)) throw e;
+      sleepSync(25);
+    }
+  }
+}
 function writeFileDurable(file, text) {
   const tmp = file + '.tmp';
   const fd = fs.openSync(tmp, 'w');
   fs.writeSync(fd, text);
   fs.fsyncSync(fd);
   fs.closeSync(fd);
-  fs.renameSync(tmp, file);
+  renameRetry(tmp, file);
+}
+
+const isObj = v => !!v && typeof v === 'object' && !Array.isArray(v);
+function validState(d) {
+  return isObj(d) && Array.isArray(d.perfs) && Array.isArray(d.jurors)
+    && d.perfs.every(p => isObj(p) && typeof p.id === 'string' && p.id)
+    && d.jurors.every(j => isObj(j) && typeof j.id === 'string' && j.id && typeof j.pin === 'string')
+    && (d.sheets === undefined || isObj(d.sheets));
+}
+// Достраивает недостающие поля, чтобы урезанная или старая копия не ломала сервер
+function normalizeState(d) {
+  const num = (v, def) => Number.isFinite(v) ? v : def;
+  const limitMin = +d.limitMin > 0 ? +d.limitMin : 15;
+  const sheets = {};
+  for (const [k, sh] of Object.entries(isObj(d.sheets) ? d.sheets : {})) {
+    if (isObj(sh)) sheets[k] = { ...sh, marks: Array.isArray(sh.marks) ? sh.marks : [], submitted: !!sh.submitted };
+  }
+  return {
+    adminPassword: typeof d.adminPassword === 'string' && d.adminPassword ? d.adminPassword : String(crypto.randomInt(100000, 1000000)),
+    criteria: Array.isArray(d.criteria) && d.criteria.length ? d.criteria.map(String) : DEFAULT_CRITERIA.slice(),
+    maxMark: Number.isInteger(d.maxMark) && d.maxMark > 0 ? d.maxMark : 5,
+    limitMin,
+    hardMin: +d.hardMin >= limitMin ? +d.hardMin : Math.max(17, limitMin),
+    jurors: d.jurors.map(j => ({ id: j.id, name: String(j.name || j.id), pin: j.pin })),
+    perfs: d.perfs.map((p, i) => ({
+      id: p.id, order: num(p.order, i + 1),
+      institute: String(p.institute || ''), title: String(p.title || ''), description: String(p.description || ''),
+      startedAt: num(p.startedAt, null), endedAt: num(p.endedAt, null),
+    })),
+    current: d.perfs.some(p => p.id === d.current) ? d.current : ((d.perfs[0] || {}).id || null),
+    sheets,
+    sessions: isObj(d.sessions) ? d.sessions : {},
+    appliedOps: isObj(d.appliedOps) ? d.appliedOps : {},
+    lastSeen: isObj(d.lastSeen) ? d.lastSeen : {},
+  };
+}
+
+function tryRead(file) {
+  try { const d = JSON.parse(fs.readFileSync(file, 'utf8')); return validState(d) ? d : null; } catch { return null; }
 }
 
 let state;
 if (fs.existsSync(STATE_FILE)) {
-  state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-  // Если в старом state остались шаблонные "Критерий 1..6", обновим на критерии ЗКНП
-  if (Array.isArray(state.criteria) && state.criteria[0] === 'Критерий 1') {
-    state.criteria = DEFAULT_CRITERIA.slice();
-    writeFileDurable(STATE_FILE, JSON.stringify(state, null, 1));
+  let loaded = tryRead(STATE_FILE);
+  if (!loaded) {
+    // Файл повреждён: откладываем его в сторону и берём самую свежую целую копию
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const aside = path.join(DATA, `state.corrupt-${stamp}.json`);
+    fs.copyFileSync(STATE_FILE, aside);
+    const candidates = ['state-latest.json', ...fs.readdirSync(LOCAL_BACKUPS).filter(f => f.startsWith('state-2')).sort().reverse()];
+    const from = candidates.find(f => fs.existsSync(path.join(LOCAL_BACKUPS, f)) && tryRead(path.join(LOCAL_BACKUPS, f)));
+    if (!from) {
+      console.error(`\n  ОШИБКА: файл данных повреждён, целой резервной копии нет.\n  Повреждённый файл сохранён как ${aside}\n  Восстановите data/state.json из копии на флешке (jury-backup/state-latest.json) и запустите снова.\n`);
+      process.exit(1);
+    }
+    loaded = tryRead(path.join(LOCAL_BACKUPS, from));
+    console.error(`\n  ВНИМАНИЕ: data/state.json был повреждён (сохранён как ${path.basename(aside)}).\n  Данные восстановлены из резервной копии ${from}.\n`);
   }
+  state = normalizeState(loaded);
+  // Если в старом state остались шаблонные "Критерий 1..6", обновим на критерии ЗКНП
+  if (state.criteria[0] === 'Критерий 1') state.criteria = DEFAULT_CRITERIA.slice();
+  writeFileDurable(STATE_FILE, JSON.stringify(state, null, 1));
 } else {
   state = defaultState();
   writeFileDurable(STATE_FILE, JSON.stringify(state, null, 1));
@@ -279,7 +342,10 @@ function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
     req.on('data', c => { size += c.length; if (size > 2e6) { reject(new Error('too big')); req.destroy(); } else chunks.push(c); });
-    req.on('end', () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); } catch (e) { reject(e); } });
+    req.on('end', () => {
+      try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); }
+      catch (e) { e.status = 400; e.message = 'Неверный формат запроса'; reject(e); }
+    });
     req.on('error', reject);
   });
 }
@@ -380,11 +446,12 @@ function adminAction(a) {
     case 'unlock': { const sh = state.sheets[a.perf + '__' + a.juror]; if (!sh) return 'bad'; sh.submitted = false; sh.submittedAt = null; break; }
     case 'forceBackup': { save(); backup(true, 'manual'); break; }
     case 'restoreState': {
-      if (!a.data || typeof a.data !== 'object' || !Array.isArray(a.data.perfs) || !Array.isArray(a.data.jurors)) return 'bad';
+      if (!validState(a.data)) return 'bad';
       backup(true, 'before_restore');
       const keepSessions = state.sessions;
       const keepPassword = state.adminPassword;
-      state = { ...a.data, adminPassword: a.data.adminPassword || keepPassword, sessions: { ...a.data.sessions, ...keepSessions } };
+      const restored = normalizeState(a.data);
+      state = { ...restored, adminPassword: a.data.adminPassword || keepPassword, sessions: { ...restored.sessions, ...keepSessions } };
       save();
       backup(true, 'after_restore');
       break;
@@ -503,6 +570,7 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       const j = state.jurors.find(x => x.pin === String(b.pin || ''));
       if (!j) { failed(ip); journal({ who: 'unknown', act: 'login-failed', ip }); return send(res, 401, { error: 'Неверный PIN' }); }
+      delete fails[ip];
       const token = rid();
       state.sessions[token] = { role: 'juror', juror: j.id, created: Date.now(), device: String(b.device || '').slice(0, 120), ip };
       journal({ who: j.id, act: 'login', ip, device: b.device });
@@ -529,6 +597,7 @@ const server = http.createServer(async (req, res) => {
       if (blocked(ip)) return send(res, 429, { error: 'Слишком много попыток. Подождите минуту.' });
       const b = await readBody(req);
       if (String(b.password || '') !== state.adminPassword) { failed(ip); journal({ who: 'unknown', act: 'admin-login-failed', ip }); return send(res, 401, { error: 'Неверный пароль' }); }
+      delete fails[ip];
       const token = rid();
       state.sessions[token] = { role: 'admin', created: Date.now(), ip };
       journal({ who: 'admin', act: 'login', ip });
@@ -559,8 +628,8 @@ const server = http.createServer(async (req, res) => {
     }
     send(res, 404, { error: 'Не найдено' });
   } catch (e) {
-    console.error(e);
-    send(res, 500, { error: 'Ошибка сервера: ' + e.message });
+    if (!e.status) console.error(e);
+    send(res, e.status || 500, { error: (e.status ? '' : 'Ошибка сервера: ') + e.message });
   }
 });
 
@@ -582,6 +651,34 @@ server.listen(PORT, '0.0.0.0', () => {
   if (extDir) console.log('  Копии на внешнюю флешку: ' + extDir);
   console.log('  Не закрывайте это окно до конца конкурса.\n');
 });
+
+// Не даём ноутбуку-серверу уснуть, пока работает сервер. Помощник сам завершится вместе с сервером.
+// Закрытие крышки это не перебивает (кроме Linux) — крышку держим открытой.
+function keepAwake() {
+  if (process.env.NO_KEEP_AWAKE) return;
+  const { spawn } = require('child_process');
+  const pid = String(process.pid);
+  let cmd, args, label;
+  if (process.platform === 'darwin') {
+    cmd = 'caffeinate'; args = ['-dims', '-w', pid]; label = 'caffeinate';
+  } else if (process.platform === 'win32') {
+    const ps = `Add-Type -Name P -Namespace W -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);'; ` +
+      `[W.P]::SetThreadExecutionState([uint32]'0x80000003') | Out-Null; ` +
+      `while (Get-Process -Id ${pid} -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 5 }`;
+    cmd = 'powershell.exe'; args = ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps]; label = 'SetThreadExecutionState';
+  } else {
+    cmd = 'systemd-inhibit';
+    args = ['--what=idle:sleep:handle-lid-switch', '--who=Оценки жюри', '--why=Идёт конкурс', '--mode=block', 'tail', `--pid=${pid}`, '-f', '/dev/null'];
+    label = 'systemd-inhibit';
+  }
+  try {
+    const child = spawn(cmd, args, { stdio: 'ignore', windowsHide: true });
+    child.on('error', () => console.log('  (Не удалось запретить сон автоматически — отключите сон в настройках питания.)'));
+    child.on('spawn', () => console.log(`  Сон ноутбука отключён на время работы сервера (${label}).`));
+    process.on('exit', () => { try { child.kill(); } catch {} });
+  } catch { /* не критично */ }
+}
+keepAwake();
 
 function shutdown() { try { backup(true, 'shutdown'); } catch (err) { /* ignore */ } process.exit(0); }
 process.on('SIGINT', shutdown);

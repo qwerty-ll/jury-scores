@@ -84,12 +84,14 @@
 
   async function act(a) {
     const t0 = Date.now();
-    try { const r = await api('/api/admin/action', a); take(r.state, t0); setupDirty = false; }
-    catch (e) { if (e.data && e.data.state) take(e.data.state, t0); alertMsg('Не получилось: ' + e.message); }
+    let ok = false;
+    try { const r = await api('/api/admin/action', a); take(r.state, t0); setupDirty = false; ok = true; }
+    catch (e) { if (e.data && e.data.state) take(e.data.state, t0); alertMsg('Не получилось: ' + (e.message === 'bad' ? 'неверные данные' : e.message)); }
     render();
+    return ok;
   }
-  let flash = '';
-  function alertMsg(t) { flash = t; setTimeout(() => { flash = ''; render(); }, 4000); }
+  let flash = '', flashKind = 'b';
+  function alertMsg(t, kind = 'b') { flash = t; flashKind = kind; setTimeout(() => { flash = ''; render(); }, 4000); }
 
   function render() {
     net.className = 'net ' + (online === false ? 'off' : online ? 'ok' : 'wait');
@@ -101,7 +103,7 @@
     else if (!S) html = `<div class="card"><h2>Загрузка…</h2></div>`;
     else {
       if (tab === 'setup' && setupDirty) return;
-      html = (flash ? `<div class="banner b">${esc(flash)}</div>` : '') + ({ stage, jurors, results, journal, setup }[tab] || stage)();
+      html = (flash ? `<div class="banner ${flashKind}">${esc(flash)}</div>` : '') + ({ stage, jurors, results, journal, setup }[tab] || stage)();
     }
     if (html !== lastHtml) { view.innerHTML = html; lastHtml = html; }
     tick();
@@ -142,7 +144,7 @@
           ${p.startedAt ? `<button class="btn danger" data-t="reset" data-arm>Сбросить время</button>` : ''}
         </div>
         ${p.startedAt ? `<div class="small muted">Начало ${time(p.startedAt)}${p.endedAt ? `, конец ${time(p.endedAt)}, длительность <b class="num" style="color:var(--fg)">${fmt(sec)}</b>` : ''}</div>` : ''}
-        <div class="small muted">Тайминг ЗКНП (автоматически): до ${S.limitMin}:00 — 2 балла · 16–${S.hardMin} мин — 1 балл · более ${S.hardMin}:00 — 0 баллов</div>
+        <div class="small muted">Тайминг ЗКНП (автоматически): до ${S.limitMin}:00 — 2 балла · ${S.limitMin}:01–${S.hardMin}:00 — 1 балл · более ${S.hardMin}:00 — 0 баллов</div>
       </section>
       ${allDone ? `<div class="banner g row"><span>✓ Все судьи (${sent}/${S.jurors.length}) отправили оценки по «${esc(p.institute)}»! Резервная копия автоматически сохранена.</span><span class="spacer"></span>${list[i + 1] ? `<button class="btn sm good" data-cur="${list[i + 1].id}">Переключить на «${esc(list[i + 1].institute)}» →</button>` : `<a class="btn sm good" href="/export/results.csv?token=${encodeURIComponent(token)}" style="text-decoration:none">Скачать итоговый Excel</a>`}</div>` : ''}
       <section class="card">
@@ -372,8 +374,7 @@
       try {
         const text = await e.target.files[0].text();
         const data = JSON.parse(text);
-        await act({ type: 'restoreState', data });
-        alertMsg('Данные успешно восстановлены из копии!');
+        if (await act({ type: 'restoreState', data })) alertMsg('Данные успешно восстановлены из копии!', 'g');
       } catch (err) {
         alertMsg('Ошибка чтения файла копии: ' + err.message);
       }

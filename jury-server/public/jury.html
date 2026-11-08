@@ -190,7 +190,7 @@
         <div class="perf-inst">${esc(p.institute)}</div>
         ${p.title ? `<div class="perf-title">«${esc(p.title)}»</div>` : ''}
         ${p.description ? `<div class="perf-desc">${esc(p.description)}</div>` : ''}
-        <div class="timer"><span class="clock" data-clock="${p.id}">${p.startedAt && !p.endedAt ? '' : fmt(sec)}</span>${timerState}<span class="muted small">до ${s.limitMin} мин: +2 б · 16–${s.hardMin} мин: +1 б · >${s.hardMin} мин: 0 б</span></div>
+        <div class="timer"><span class="clock" data-clock="${p.id}">${p.startedAt && !p.endedAt ? '' : fmt(sec)}</span>${timerState}<span class="muted small">до ${s.limitMin} мин: +2 б · ${s.limitMin}:01–${s.hardMin}:00: +1 б · >${s.hardMin} мин: 0 б</span></div>
       </section>
       <section class="card ${locked ? 'locked' : ''}" aria-label="Критерии ЗКНП">
         ${s.criteria.map((name, i) => `
@@ -205,7 +205,7 @@
             <span class="crit-n">${n + 1}</span>
             <div style="flex:1;min-width:0">
               <div class="crit-name">Тайминг <span class="pill ${pillFor(tp)}" style="margin-left:8px;vertical-align:middle">${tp != null ? `+${tp} ${ptsWord(tp)}` : 'выставляется автоматически'}</span></div>
-              <div class="small muted">2 балла — до ${s.limitMin} минут · 1 балл — 16–${s.hardMin} минут · 0 баллов — более ${s.hardMin} минут</div>
+              <div class="small muted">2 балла — до ${s.limitMin} минут · 1 балл — ${s.limitMin}:01–${s.hardMin}:00 · 0 баллов — более ${s.hardMin} минут</div>
             </div>
           </div>
         </div>
