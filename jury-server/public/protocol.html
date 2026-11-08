@@ -37,7 +37,7 @@
     <table><thead><tr><th>Место</th><th>Институт</th><th>Постановка</th><th class="r">Время</th><th class="r">Среднее жюри (из ${maxJury})</th><th class="r">Тайминг (0–2)</th><th class="r">Итог (из ${maxJury + 2})</th></tr></thead>
     <tbody>${rows.map(x => `<tr><td>${place.get(x.perf) ?? '—'}</td><td>${esc(x.institute)}</td><td>${esc(x.title)}</td><td class="r">${fmt(x.seconds)}</td><td class="r">${n2(x.avg)}</td><td class="r">${x.timing ?? '—'}</td><td class="r"><b>${n2(x.total)}</b></td></tr>`).join('')}</tbody></table>
     <h3>Оценки по критериям</h3>
-    <p class="small">${S.criteria.map((c, i) => `<b>${i + 1}</b> — ${esc(c)}`).join('<br>')}<br><b>${S.criteria.length + 1}</b> — Тайминг (автоматически: до ${S.limitMin} мин — 2 балла, 16–${S.hardMin} мин — 1 балл, >${S.hardMin} мин — 0 баллов)</p>
+    <p class="small">${S.criteria.map((c, i) => `<b>${i + 1}</b> — ${esc(c)}`).join('<br>')}<br><b>${S.criteria.length + 1}</b> — Тайминг (автоматически: до ${S.limitMin} мин — 2 балла, ${S.limitMin}:01–${S.hardMin}:00 — 1 балл, >${S.hardMin} мин — 0 баллов)</p>
     ${rows.map(x => `<div style="break-inside:avoid;margin-bottom:14px"><b>${esc(x.institute)}</b> «${esc(x.title)}»
       <table style="font-size:13px"><thead><tr><th>Судья</th>${S.criteria.map((_, i) => `<th class="r">${i + 1}</th>`).join('')}<th class="r">Сумма (из ${maxJury})</th><th>Отправлено</th></tr></thead>
       <tbody>${x.sheets.map(s => `<tr><td>${esc(s.name)}</td>${s.marks.map(v => `<td class="r">${v ?? '·'}</td>`).join('')}<td class="r">${s.filled ? s.sum : '—'}</td><td>${s.submitted ? new Date(s.submittedAt).toLocaleTimeString('ru-RU') : 'нет'}</td></tr>`).join('')}</tbody></table></div>`).join('')}
