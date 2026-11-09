@@ -159,6 +159,15 @@ if (fs.existsSync(STATE_FILE)) {
   state = normalizeState(loaded);
   // Если в старом state остались шаблонные "Критерий 1..6", обновим на критерии ЗКНП
   if (state.criteria[0] === 'Критерий 1') state.criteria = DEFAULT_CRITERIA.slice();
+  // Старые установки создавали 3 судей. Если их никто не переименовывал и не удалял — добавляем до 9,
+  // PIN и оценки первых трёх сохраняются. Судей, настроенных вручную, не трогаем.
+  const wanted = Math.min(50, Math.max(1, Math.floor(+process.env.JURORS) || 9));
+  const untouched = state.jurors.length < wanted
+    && state.jurors.every((j, i) => j.id === 'j' + (i + 1) && j.name === 'Жюри ' + (i + 1));
+  if (untouched) {
+    for (let i = state.jurors.length + 1; i <= wanted; i++) state.jurors.push({ id: 'j' + i, name: 'Жюри ' + i, pin: newPin(state) });
+    console.log(`  Добавлены судьи до ${wanted} (PIN первых не изменились).`);
+  }
   writeFileDurable(STATE_FILE, JSON.stringify(state, null, 1));
 } else {
   state = defaultState();

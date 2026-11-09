@@ -422,6 +422,44 @@ await test('после перезапуска сервер остаётся на
   } finally { proc.kill(); }
 });
 
+await test('старая установка с 3 судьями дополняется до 9, PIN и оценки сохраняются', async () => {
+  const d = tmpDir();
+  const s1 = await startServer(d);            // JURORS=3, как в старой версии
+  const A1 = await adminLogin(s1);
+  const old = readState(d).jurors;
+  const t = (await s1.call('/api/login', { pin: old[0].pin })).json.token;
+  await s1.call('/api/sync', { ops: markOps('p1', [1, 2, 3, 4, 5, 5]) }, t);
+  await s1.stop();
+  const env = { ...process.env, NO_KEEP_AWAKE: '1', DATA_DIR: d, PORT: String(await freePort()) };
+  delete env.JURORS;
+  const proc = spawn(process.execPath, [SERVER], { env });
+  let out = ''; proc.stdout.on('data', c => { out += c; });
+  try {
+    for (let i = 0; i < 60 && !/Добавлены судьи/.test(out); i++) await sleep(100);
+    const st = readState(d);
+    assert.equal(st.jurors.length, 9);
+    assert.deepEqual(st.jurors.slice(0, 3).map(j => j.pin), old.map(j => j.pin));
+    assert.equal(new Set(st.jurors.map(j => j.pin)).size, 9);
+    assert.ok(st.sheets['p1__' + old[0].id].submitted, 'оценки на месте');
+  } finally { proc.kill(); }
+  void A1;
+});
+
+await test('переименованных вручную судей не дополняет', async () => {
+  const d = tmpDir();
+  const s1 = await startServer(d);
+  const A1 = await adminLogin(s1);
+  await s1.call('/api/admin/action', { type: 'renameJuror', id: 'j1', name: 'Иванова' }, A1);
+  await s1.stop();
+  const env = { ...process.env, NO_KEEP_AWAKE: '1', DATA_DIR: d, PORT: String(await freePort()) };
+  delete env.JURORS;
+  const proc = spawn(process.execPath, [SERVER], { env });
+  try {
+    await sleep(800);
+    assert.equal(readState(d).jurors.length, 3);
+  } finally { proc.kill(); }
+});
+
 // ---------- итог ----------
 const failed = results.filter(r => !r.ok);
 console.log(`\n${results.length - failed.length} из ${results.length} проверок прошли${failed.length ? `, упали: ${failed.length}` : ''}.\n`);
