@@ -11,7 +11,8 @@ const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
 
-const PORT = +process.env.PORT || 8080;
+let PORT = +process.env.PORT || 8080;
+const FIRST_PORT = PORT;
 const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA, 'state.json');
 const JOURNAL_FILE = path.join(DATA, 'journal.jsonl');
@@ -633,7 +634,35 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
+// Порт занят: если это уже наш сервер — второй не запускаем (иначе два сервера пишут одни данные),
+// иначе занят чужой программой — пробуем следующие порты.
+server.on('error', e => {
+  if (e.code !== 'EADDRINUSE') { console.error('\n  ОШИБКА запуска сервера:', e.message); process.exit(1); }
+  http.get({ host: '127.0.0.1', port: PORT, path: '/api/ping', timeout: 1500 }, res => {
+    let body = '';
+    res.on('data', c => { body += c; });
+    res.on('end', () => {
+      if (body.includes('jury-zknp')) {
+        console.log(`\n  Сервер жюри УЖЕ запущен на порту ${PORT} (в другом окне).`);
+        console.log(`  Пульт: http://localhost:${PORT}/admin — второй сервер не нужен.\n`);
+        process.exit(0);
+      }
+      nextPort();
+    });
+  }).on('error', nextPort).on('timeout', function () { this.destroy(); });
+});
+function nextPort() {
+  if (PORT >= FIRST_PORT + 10) {
+    console.error(`\n  ОШИБКА: порты ${FIRST_PORT}–${PORT} заняты другими программами. Запустите с другим портом, например PORT=9090.\n`);
+    process.exit(1);
+  }
+  console.log(`  Порт ${PORT} занят другой программой — пробую ${PORT + 1}.`);
+  PORT++;
+  server.listen(PORT, '0.0.0.0');
+}
+
+server.listen(PORT, '0.0.0.0');
+server.on('listening', () => {
   const addrs = lanAddresses();
   const extDir = resolveExternalBackupDir();
   console.log('\n  ======================================================');
@@ -649,6 +678,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('\n  Автобэкап: мгновенно при отправке оценок + каждую минуту + полный срез каждые 15 мин.');
   console.log('  Локальные данные: ' + DATA);
   if (extDir) console.log('  Копии на внешнюю флешку: ' + extDir);
+  if (PORT !== FIRST_PORT) console.log(`  ВНИМАНИЕ: порт ${FIRST_PORT} был занят, сервер работает на порту ${PORT} — у жюри адрес с :${PORT}.`);
   console.log('  Не закрывайте это окно до конца конкурса.\n');
 });
 

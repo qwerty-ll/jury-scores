@@ -5,7 +5,8 @@ Write-Host "======================================================" -ForegroundC
 Write-Host " Автоматическое подключение ноутбука ЖЮРИ ЗКНП (Windows)" -ForegroundColor Cyan
 Write-Host "======================================================" -ForegroundColor Cyan
 
-$Port = 8080
+$Ports = @(8080, 8081, 8082)   # сервер уходит на 8081+, если 8080 занят
+$Port = $null
 $FoundIP = $null
 
 $LocalIPs = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } | Select-Object -ExpandProperty IPAddress
@@ -17,14 +18,14 @@ foreach ($lip in $LocalIPs) {
 
     1..254 | ForEach-Object -Parallel {
         $ip = "$using:subnet.$_"
-        try {
-            $resp = Invoke-RestMethod -Uri "http://${ip}:$using:Port/api/ping" -TimeoutSec 1 -ErrorAction Stop
-            if ($resp.app -eq "jury-zknp") {
-                $ip
-            }
-        } catch {}
+        foreach ($pp in $using:Ports) {
+            try {
+                $resp = Invoke-RestMethod -Uri "http://${ip}:${pp}/api/ping" -TimeoutSec 1 -ErrorAction Stop
+                if ($resp.app -eq "jury-zknp") { "${ip}:${pp}" }
+            } catch {}
+        }
     } -ThrottleLimit 64 | ForEach-Object {
-        if ($_) { $FoundIP = $_ }
+        if ($_) { $FoundIP, $Port = $_.Split(':') }
     }
     if ($FoundIP) { break }
 }
@@ -38,28 +39,30 @@ if (-not $FoundIP) {
         $priority = @(1, 2, 137) + (2..254)
         foreach ($i in ($priority | Select-Object -Unique)) {
             $ip = "$subnet.$i"
-            $tcp = New-Object System.Net.Sockets.TcpClient
-            try {
-                $iar = $tcp.BeginConnect($ip, $Port, $null, $null)
-                if ($iar.AsyncWaitHandle.WaitOne(80, $false)) {
-                    $tcp.EndConnect($iar)
-                    $resp = Invoke-RestMethod -Uri "http://${ip}:${Port}/api/ping" -TimeoutSec 1 -ErrorAction Stop
-                    if ($resp.app -eq "jury-zknp") {
-                        $FoundIP = $ip
-                        $tcp.Close()
-                        break
+            foreach ($pp in $Ports) {
+                $tcp = New-Object System.Net.Sockets.TcpClient
+                try {
+                    $iar = $tcp.BeginConnect($ip, $pp, $null, $null)
+                    if ($iar.AsyncWaitHandle.WaitOne(80, $false)) {
+                        $tcp.EndConnect($iar)
+                        $resp = Invoke-RestMethod -Uri "http://${ip}:${pp}/api/ping" -TimeoutSec 1 -ErrorAction Stop
+                        if ($resp.app -eq "jury-zknp") { $FoundIP = $ip; $Port = $pp }
                     }
-                }
-            } catch {}
-            $tcp.Close()
+                } catch {}
+                $tcp.Close()
+                if ($FoundIP) { break }
+            }
+            if ($FoundIP) { break }
         }
         if ($FoundIP) { break }
     }
 }
 
 if (-not $FoundIP) {
-    $FoundIP = Read-Host "Введите IP-адрес сервера (из окна сервера, например 192.168.137.1)"
+    $answer = Read-Host "Введите адрес сервера из его окна (например 192.168.137.1:8080)"
+    $FoundIP, $Port = $answer.Split(':')
 }
+if (-not $Port) { $Port = 8080 }
 
 $Url = "http://${FoundIP}:${Port}"
 Write-Host "✓ Сервер найден: $Url" -ForegroundColor Green

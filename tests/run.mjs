@@ -357,6 +357,38 @@ await test('повреждённый state.json и нет копий: серве
   assert.equal(fs.readFileSync(path.join(d, 'state.json'), 'utf8'), 'мусор', 'исходный файл не затёрт');
 });
 
+await test('порт занят чужой программой: сервер сам берёт следующий', async () => {
+  const port = await freePort();
+  const blocker = net.createServer().listen(port, '0.0.0.0');
+  await new Promise(r => blocker.once('listening', r));
+  const d = tmpDir();
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, NO_KEEP_AWAKE: '1', PORT: String(port), DATA_DIR: d, ADMIN_PASSWORD: PASSWORD } });
+  let out = ''; proc.stdout.on('data', c => { out += c; }); proc.stderr.on('data', c => { out += c; });
+  try {
+    let ok = false;
+    for (let i = 0; i < 60 && !ok; i++) {
+      try { ok = (await fetch(`http://127.0.0.1:${port + 1}/api/ping`)).ok; } catch {}
+      if (!ok) await sleep(100);
+    }
+    assert.ok(ok, 'сервер отвечает на следующем порту\n' + out);
+    assert.match(out, new RegExp(`Порт ${port} занят`));
+    assert.match(out, new RegExp(`:${port + 1}`), 'в окне напечатан новый адрес');
+  } finally { proc.kill(); blocker.close(); }
+});
+
+await test('сервер уже запущен: второй экземпляр не стартует на тех же данных', async () => {
+  const d = tmpDir();
+  const s1 = await startServer(d);
+  try {
+    const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, NO_KEEP_AWAKE: '1', PORT: String(s1.port), DATA_DIR: d } });
+    let out = ''; proc.stdout.on('data', c => { out += c; });
+    const code = await new Promise(r => proc.on('exit', r));
+    assert.equal(code, 0);
+    assert.match(out, /УЖЕ запущен/);
+    assert.equal((await s1.call('/api/ping')).status, 200, 'первый сервер работает');
+  } finally { await s1.stop(); }
+});
+
 // ---------- итог ----------
 const failed = results.filter(r => !r.ok);
 console.log(`\n${results.length - failed.length} из ${results.length} проверок прошли${failed.length ? `, упали: ${failed.length}` : ''}.\n`);
