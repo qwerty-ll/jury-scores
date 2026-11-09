@@ -11,8 +11,8 @@ const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
 
-let PORT = +process.env.PORT || 8080;
-const FIRST_PORT = PORT;
+// Порт: PORT=… при запуске, иначе тот, на котором сервер работал в прошлый раз, иначе 8080
+let PORT, FIRST_PORT;
 const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA, 'state.json');
 const JOURNAL_FILE = path.join(DATA, 'journal.jsonl');
@@ -72,7 +72,9 @@ function defaultState() {
     appliedOps: {}, // id операции с устройства судьи -> время; защищает от двойной отправки
     lastSeen: {},   // juror -> время последнего запроса
   };
-  for (let i = 1; i <= 3; i++) s.jurors.push({ id: 'j' + i, name: 'Жюри ' + i, pin: newPin(s) });
+  // По умолчанию 9 судей; другое число — JURORS=5 при первом запуске (потом — в пульте)
+  const count = Math.min(50, Math.max(1, Math.floor(+process.env.JURORS) || 9));
+  for (let i = 1; i <= count; i++) s.jurors.push({ id: 'j' + i, name: 'Жюри ' + i, pin: newPin(s) });
   return s;
 }
 
@@ -129,6 +131,7 @@ function normalizeState(d) {
     sessions: isObj(d.sessions) ? d.sessions : {},
     appliedOps: isObj(d.appliedOps) ? d.appliedOps : {},
     lastSeen: isObj(d.lastSeen) ? d.lastSeen : {},
+    lastPort: Number.isInteger(d.lastPort) ? d.lastPort : null,
   };
 }
 
@@ -161,6 +164,8 @@ if (fs.existsSync(STATE_FILE)) {
   state = defaultState();
   writeFileDurable(STATE_FILE, JSON.stringify(state, null, 1));
 }
+PORT = +process.env.PORT || state.lastPort || 8080;
+FIRST_PORT = PORT;
 let dirtySinceBackup = true;
 function save() {
   writeFileDurable(STATE_FILE, JSON.stringify(state, null, 1));
@@ -678,6 +683,7 @@ server.on('listening', () => {
   console.log('\n  Автобэкап: мгновенно при отправке оценок + каждую минуту + полный срез каждые 15 мин.');
   console.log('  Локальные данные: ' + DATA);
   if (extDir) console.log('  Копии на внешнюю флешку: ' + extDir);
+  if (state.lastPort !== PORT) { state.lastPort = PORT; save(); }
   if (PORT !== FIRST_PORT) console.log(`  ВНИМАНИЕ: порт ${FIRST_PORT} был занят, сервер работает на порту ${PORT} — у жюри адрес с :${PORT}.`);
   console.log('  Не закрывайте это окно до конца конкурса.\n');
 });

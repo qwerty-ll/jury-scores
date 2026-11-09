@@ -19,7 +19,7 @@ async function startServer(dataDir) {
   const port = await freePort();
   const backupDir = path.join(dataDir, 'usb');
   const proc = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, NO_KEEP_AWAKE: '1', PORT: String(port), DATA_DIR: dataDir, ADMIN_PASSWORD: PASSWORD, BACKUP_DIR: backupDir },
+    env: { ...process.env, NO_KEEP_AWAKE: '1', JURORS: '3', PORT: String(port), DATA_DIR: dataDir, ADMIN_PASSWORD: PASSWORD, BACKUP_DIR: backupDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
@@ -387,6 +387,39 @@ await test('сервер уже запущен: второй экземпляр 
     assert.match(out, /УЖЕ запущен/);
     assert.equal((await s1.call('/api/ping')).status, 200, 'первый сервер работает');
   } finally { await s1.stop(); }
+});
+
+await test('по умолчанию 9 судей с разными PIN', async () => {
+  const d = tmpDir();
+  const port = await freePort();
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, NO_KEEP_AWAKE: '1', JURORS: '', PORT: String(port), DATA_DIR: d } });
+  try {
+    for (let i = 0; i < 60 && !fs.existsSync(path.join(d, 'state.json')); i++) await sleep(50);
+    await sleep(100);
+    const st = readState(d);
+    assert.equal(st.jurors.length, 9);
+    assert.equal(new Set(st.jurors.map(j => j.pin)).size, 9);
+    assert.equal(st.jurors[8].name, 'Жюри 9');
+  } finally { proc.kill(); }
+});
+
+await test('после перезапуска сервер остаётся на том же порту (адрес у жюри не меняется)', async () => {
+  const d = tmpDir();
+  const s1 = await startServer(d);
+  const port = s1.port;
+  await s1.stop();
+  assert.equal(readState(d).lastPort, port);
+  const env = { ...process.env, NO_KEEP_AWAKE: '1', DATA_DIR: d };
+  delete env.PORT;
+  const proc = spawn(process.execPath, [SERVER], { env });
+  try {
+    let ok = false;
+    for (let i = 0; i < 60 && !ok; i++) {
+      try { ok = (await fetch(`http://127.0.0.1:${port}/api/ping`)).ok; } catch {}
+      if (!ok) await sleep(100);
+    }
+    assert.ok(ok, 'без PORT сервер снова на порту ' + port);
+  } finally { proc.kill(); }
 });
 
 // ---------- итог ----------
