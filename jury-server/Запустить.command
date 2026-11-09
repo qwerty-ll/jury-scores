@@ -1,6 +1,8 @@
 #!/bin/bash
 # Двойной щелчок — запуск сервера оценок жюри.
 cd "$(dirname "$0")"
+# Node.js, поставленный install.sh без sudo
+PATH="$HOME/.jury-node/bin:$PATH"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Не найден Node.js. Установите его с https://nodejs.org (кнопка LTS) и запустите снова."

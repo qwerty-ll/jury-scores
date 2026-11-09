@@ -29,6 +29,11 @@
 ## 🚀 Быстрый запуск (1 команда)
 
 ### 1. На главном ноутбуке (Сервер — Mac / Windows / Linux)
+Linux / macOS, без sudo (в том числе учебный профиль):
+```bash
+curl -fsSL https://raw.githubusercontent.com/qwerty-ll/jury-scores/main/install.sh | bash
+```
+Или вручную:
 ```bash
 git clone https://github.com/qwerty-ll/jury-scores.git && cd jury-scores && npm start
 ```
